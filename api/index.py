@@ -5,19 +5,22 @@ import os
 from pydantic import BaseModel
 from typing import Optional
 
-# --- Carregar variáveis do .env ---
+# Carregar variáveis do .env
 from dotenv import load_dotenv
 load_dotenv() 
 
-# --- SEGURANÇA: Bcrypt Direto (Sem passlib) ---
+# --- SEGURANÇA: BCRYPT DIRETO (SEM PASSLIB) ---
+# Isto resolve o erro "AttributeError: module 'bcrypt' has no attribute '__about__'"
 import bcrypt
 
 def verify_password(plain_password, hashed_password):
+    # Converte para bytes antes de verificar
     password_byte_enc = plain_password.encode('utf-8')
     hashed_password_byte_enc = hashed_password.encode('utf-8')
     return bcrypt.checkpw(password_byte_enc, hashed_password_byte_enc)
 
 def get_password_hash(password):
+    # Gera o hash diretamente com bcrypt
     pwd_bytes = password.encode('utf-8')
     salt = bcrypt.gensalt()
     hashed = bcrypt.hashpw(pwd_bytes, salt)
@@ -39,13 +42,16 @@ class User(Base):
     username = Column(String, unique=True, index=True, nullable=False)
     hashed_password = Column(String, nullable=False)
     
+    # Perfil
     bio = Column(String, default="Apenas mais um gamer apaixonado.")
     avatar_url = Column(Text, default="https://images.unsplash.com/photo-1633332755192-727a05c4013d?w=200&h=200&fit=crop")
     banner_url = Column(String, default="https://images.unsplash.com/photo-1579546929518-9e396f3cc809?w=1920&h=400&fit=crop")
     
+    # Progresso
     xp = Column(Integer, default=0)
     level = Column(Integer, default=1)
     
+    # Contas
     steam_connected = Column(Boolean, default=False)
     xbox_connected = Column(Boolean, default=False)
     psn_connected = Column(Boolean, default=False)
@@ -56,8 +62,8 @@ class Review(Base):
     id = Column(Integer, primary_key=True, index=True)
     game_id = Column(Integer, nullable=False, index=True) 
     game_name = Column(String) 
-    # --- COLUNA IMPORTANTE PARA O PERFIL ---
-    game_image_url = Column(String) 
+    # Coluna para a imagem do jogo
+    game_image_url = Column(String, nullable=True) 
     
     jogabilidade = Column(Float)
     graficos = Column(Float)
@@ -106,7 +112,8 @@ class UserUpdate(BaseModel):
 class ReviewInput(BaseModel):
     game_id: int
     game_name: str
-    game_image_url: str # AGORA É OBRIGATÓRIO
+    # Opcional, caso a API não encontre imagem
+    game_image_url: Optional[str] = ""
     jogabilidade: float
     graficos: float
     narrativa: float
@@ -121,7 +128,7 @@ def dangerous_reset_db(db: Session = Depends(get_db)):
         global engine
         Base.metadata.drop_all(bind=engine)
         Base.metadata.create_all(bind=engine)
-        return {"message": "Banco resetado com sucesso! (Tabelas atualizadas)"}
+        return {"message": "Banco resetado com sucesso! Tabelas atualizadas."}
     except Exception as e:
         return {"error": f"Erro: {e}"}
 
@@ -129,7 +136,10 @@ def dangerous_reset_db(db: Session = Depends(get_db)):
 def register(user: UserCreate, db: Session = Depends(get_db)):
     if db.query(User).filter(User.email == user.email).first():
         raise HTTPException(status_code=400, detail="Email já cadastrado")
+    
+    # Usa a nova função segura
     hashed_pw = get_password_hash(user.password)
+    
     new_user = User(email=user.email, username=user.username, hashed_password=hashed_pw)
     db.add(new_user)
     db.commit()
@@ -139,6 +149,8 @@ def register(user: UserCreate, db: Session = Depends(get_db)):
 @app.post("/api/auth/login")
 def login(user_login: UserLogin, db: Session = Depends(get_db)):
     user = db.query(User).filter(User.email == user_login.email).first()
+    
+    # Usa a nova função segura
     if not user or not verify_password(user_login.password, user.hashed_password):
         raise HTTPException(status_code=400, detail="Dados incorretos")
     return {"message": "Login OK", "user_id": user.id, "username": user.username}
@@ -154,13 +166,13 @@ def get_profile(user_id: int, db: Session = Depends(get_db)):
         .order_by(desc(Review.nota_geral))\
         .limit(3).all()
     
-    # Converter para JSON seguro
+    # Serialização manual para evitar erros
     top_reviews_data = []
     for r in top_reviews:
         top_reviews_data.append({
             "id": r.id,
             "game_name": r.game_name,
-            "game_image_url": r.game_image_url,
+            "game_image_url": r.game_image_url or "",
             "nota_geral": r.nota_geral,
             "jogabilidade": r.jogabilidade,
             "graficos": r.graficos,
@@ -202,52 +214,66 @@ def update_profile(data: UserUpdate, db: Session = Depends(get_db)):
 
 @app.post("/api/review")
 def post_review(review_input: ReviewInput, db: Session = Depends(get_db)):
-    notas = [review_input.jogabilidade, review_input.graficos, review_input.narrativa, review_input.audio, review_input.desempenho]
-    nota_geral = sum(notas) / len(notas)
-    
-    existing = db.query(Review).filter(Review.game_id == review_input.game_id, Review.owner_id == review_input.owner_id).first()
-    
-    if existing:
-        existing.jogabilidade = review_input.jogabilidade
-        existing.graficos = review_input.graficos
-        existing.narrativa = review_input.narrativa
-        existing.audio = review_input.audio
-        existing.desempenho = review_input.desempenho
-        existing.nota_geral = nota_geral
-        existing.game_image_url = review_input.game_image_url
+    try:
+        notas = [review_input.jogabilidade, review_input.graficos, review_input.narrativa, review_input.audio, review_input.desempenho]
+        nota_geral = sum(notas) / len(notas)
+        
+        existing = db.query(Review).filter(Review.game_id == review_input.game_id, Review.owner_id == review_input.owner_id).first()
+        
+        if existing:
+            existing.jogabilidade = review_input.jogabilidade
+            existing.graficos = review_input.graficos
+            existing.narrativa = review_input.narrativa
+            existing.audio = review_input.audio
+            existing.desempenho = review_input.desempenho
+            existing.nota_geral = nota_geral
+            # Atualiza imagem se vier no input
+            if review_input.game_image_url:
+                existing.game_image_url = review_input.game_image_url
+            db.commit()
+            return {"message": "Review atualizada!"}
+        
+        new_review = Review(
+            game_id=review_input.game_id, 
+            game_name=review_input.game_name, 
+            game_image_url=review_input.game_image_url, # Agora salva a imagem!
+            jogabilidade=review_input.jogabilidade, 
+            graficos=review_input.graficos,
+            narrativa=review_input.narrativa, 
+            audio=review_input.audio,
+            desempenho=review_input.desempenho, 
+            nota_geral=nota_geral,
+            owner_id=review_input.owner_id
+        )
+        db.add(new_review)
+        
+        user = db.query(User).filter(User.id == review_input.owner_id).first()
+        if user:
+            user.xp += 100
+            user.level = 1 + (user.xp // 500)
+        
         db.commit()
-        return {"message": "Review atualizada!"}
-    
-    new_review = Review(
-        game_id=review_input.game_id, game_name=review_input.game_name, 
-        game_image_url=review_input.game_image_url,
-        jogabilidade=review_input.jogabilidade, graficos=review_input.graficos,
-        narrativa=review_input.narrativa, audio=review_input.audio,
-        desempenho=review_input.desempenho, nota_geral=nota_geral,
-        owner_id=review_input.owner_id
-    )
-    db.add(new_review)
-    
-    user = db.query(User).filter(User.id == review_input.owner_id).first()
-    if user:
-        user.xp += 100
-        user.level = 1 + (user.xp // 500)
-    
-    db.commit()
-    return {"message": "Review salva!"}
+        return {"message": "Review salva!"}
+    except Exception as e:
+        db.rollback()
+        return {"error": str(e)}
 
 def get_api_key(): return os.environ.get('GIANTBOMB_API_KEY') or ""
 
 @app.get("/api/search")
 def search_games(q: str = None, api_key: str = Depends(get_api_key)):
     if not q: return []
-    r = requests.get("https://www.giantbomb.com/api/search/", params={'api_key': api_key, 'format': 'json', 'query': q, 'resources': 'game', 'limit': 10, 'field_list': 'id,name,image'}, headers={'User-Agent': 'MeuApp'})
-    return r.json().get('results', [])
+    try:
+        r = requests.get("https://www.giantbomb.com/api/search/", params={'api_key': api_key, 'format': 'json', 'query': q, 'resources': 'game', 'limit': 10, 'field_list': 'id,name,image'}, headers={'User-Agent': 'MeuApp'})
+        return r.json().get('results', [])
+    except: return []
 
 @app.get("/api/game/{game_id}")
 def get_game(game_id: str, api_key: str = Depends(get_api_key)):
-    r = requests.get(f"https://www.giantbomb.com/api/game/3030-{game_id}/", params={'api_key': api_key, 'format': 'json', 'field_list': 'name,deck,image'}, headers={'User-Agent': 'MeuApp'})
-    return r.json().get('results', {})
+    try:
+        r = requests.get(f"https://www.giantbomb.com/api/game/3030-{game_id}/", params={'api_key': api_key, 'format': 'json', 'field_list': 'name,deck,image'}, headers={'User-Agent': 'MeuApp'})
+        return r.json().get('results', {})
+    except: return {}
 
 @app.get("/api/review")
 def get_review(game_id: int, owner_id: int, db: Session = Depends(get_db)):
