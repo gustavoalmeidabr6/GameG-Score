@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { ArrowLeft, Edit, TrendingUp, Star, Award, Check, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -6,57 +6,66 @@ import { Progress } from "@/components/ui/progress";
 import { RadarChart } from "@/components/RadarChart";
 import { EditProfileDialog } from "@/components/EditProfileDialog";
 import welcomeBg from "@/assets/welcome-bg.jpg";
-import heroBanner from "@/assets/hero-banner-green.jpg";
+import { toast } from "sonner";
 
-const linkedAccounts = [
-  { name: "Xbox", icon: "🎮", connected: true },
-  { name: "Steam", icon: "🎮", connected: true },
-  { name: "Epic Games", icon: "🎮", connected: false },
-  { name: "PSN", icon: "🎮", connected: false },
-];
-
-const stats = [
-  { label: "Jogos Avaliados", value: "42", icon: TrendingUp },
-  { label: "Média de Notas", value: "8.7", icon: Star },
-  { label: "Gênero Favorito", value: "RPG", icon: Award },
-];
-
-const achievements = [
-  { name: "Primeira Review", unlocked: true, icon: "🏆" },
-  { name: "Crítico de RPG", unlocked: true, icon: "⚔️" },
-  { name: "Maratonista", unlocked: true, icon: "🎯" },
-  { name: "Colecionador", unlocked: false, icon: "📚" },
-  { name: "Explorador", unlocked: false, icon: "🗺️" },
-  { name: "Speedrunner", unlocked: false, icon: "⚡" },
-];
-
-const topFavorites = [
-  { 
-    title: "The Witcher 3", 
-    ratings: { jogabilidade: 9, graficos: 10, narrativa: 10, audio: 9, desempenho: 8 },
-    cover: "https://images.unsplash.com/photo-1538481199705-c710c4e965fc?w=400&h=400&fit=crop"
-  },
-  { 
-    title: "Elden Ring", 
-    ratings: { jogabilidade: 10, graficos: 9, narrativa: 9, audio: 9, desempenho: 7 },
-    cover: "https://images.unsplash.com/photo-1511512578047-dfb367046420?w=400&h=400&fit=crop"
-  },
-  { 
-    title: "Cyberpunk 2077", 
-    ratings: { jogabilidade: 8, graficos: 10, narrativa: 9, audio: 9, desempenho: 7 },
-    cover: "https://images.unsplash.com/photo-1542751371-adc38448a05e?w=400&h=400&fit=crop"
-  },
+const PLATFORMS = [
+  { name: "Xbox", key: "xbox", icon: "/images/xbox-logo.png" },
+  { name: "Steam", key: "steam", icon: "/images/steam-logo.png" },
+  { name: "Epic Games", key: "epic", icon: "/images/epic-logo.png" },
+  { name: "PSN", key: "psn", icon: "/images/psn-logo.png" },
 ];
 
 export default function Profile() {
   const navigate = useNavigate();
-  const [xpProgress] = useState(65);
-  const [level] = useState(10);
+  const [profile, setProfile] = useState<any>(null);
+  const [loading, setLoading] = useState(true);
   const [editDialogOpen, setEditDialogOpen] = useState(false);
 
+  const fetchProfile = async () => {
+    const userId = localStorage.getItem("userId");
+    if (!userId) {
+      navigate("/login");
+      return;
+    }
+
+    try {
+      const response = await fetch(`/api/profile/${userId}`);
+      
+      // --- CORREÇÃO: Se o usuário não existe mais no banco ---
+      if (response.status === 404) {
+        toast.error("Sessão expirada. Faça login novamente.");
+        localStorage.clear();
+        navigate("/login");
+        return;
+      }
+
+      const data = await response.json();
+      if (response.ok) {
+        setProfile(data);
+      } else {
+        toast.error("Erro ao carregar perfil.");
+      }
+    } catch (error) {
+      console.error("Erro:", error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchProfile();
+  }, [navigate]);
+
+  if (loading || !profile) {
+    return <div className="min-h-screen bg-black text-white flex items-center justify-center font-pixel">CARREGANDO PERFIL...</div>;
+  }
+
+  const userAverage = profile.top_favorites?.length > 0
+    ? (profile.top_favorites.reduce((acc: any, curr: any) => acc + curr.nota_geral, 0) / profile.top_favorites.length).toFixed(1)
+    : "0.0";
+
   return (
-    <div className="min-h-screen relative text-foreground p-6">
-      {/* Full-screen Background Image with Overlay */}
+    <div className="min-h-screen relative text-white p-6 font-sans">
       <div 
         className="fixed inset-0 z-0"
         style={{
@@ -66,15 +75,13 @@ export default function Profile() {
           backgroundAttachment: 'fixed'
         }}
       >
-        <div className="absolute inset-0 bg-background/80" />
+        <div className="absolute inset-0 bg-black/80" />
       </div>
       
-      {/* Content */}
       <div className="relative z-10">
-        {/* Back Button */}
         <Button
           variant="ghost"
-          onClick={() => navigate("/")}
+          onClick={() => navigate("/home")}
           className="mb-6 text-primary hover:text-primary/80 hover:bg-primary/10"
         >
           <ArrowLeft className="mr-2 h-4 w-4" />
@@ -82,186 +89,194 @@ export default function Profile() {
         </Button>
 
         <div className="max-w-7xl mx-auto space-y-6">
-          {/* Profile Header with Banner Background */}
+          
+          {/* HEADER */}
           <div className="relative glass-panel rounded-2xl border-2 border-primary/30 overflow-hidden shadow-[0_0_30px_hsl(var(--primary)/0.2)]">
-            {/* Banner Background */}
             <div 
               className="absolute inset-0"
               style={{
-                backgroundImage: `url(${heroBanner})`,
+                backgroundImage: `url(${profile.banner_url})`,
                 backgroundSize: 'cover',
                 backgroundPosition: 'center',
               }}
             >
-              <div className="absolute inset-0 bg-background/85" />
+              <div className="absolute inset-0 bg-black/70" />
             </div>
             
             <div className="relative p-8">
-              <div className="flex flex-col md:flex-row gap-8 items-start">
-              {/* Avatar Section */}
-              <div className="flex flex-col items-center gap-4">
-                <div className="relative">
-                  <img
-                    src="https://images.unsplash.com/photo-1633332755192-727a05c4013d?w=200&h=200&fit=crop"
-                    alt="Profile"
-                    className="w-32 h-32 rounded-full border-4 border-primary/50 ring-2 ring-primary/20 ring-offset-2 ring-offset-background"
-                  />
-                  <div className="absolute -bottom-2 left-1/2 -translate-x-1/2 glass-panel px-3 py-1 rounded-full border border-primary/30">
-                    <span className="text-xs font-black text-primary">LVL {level}</span>
+              <div className="flex flex-col md:flex-row gap-8 items-center md:items-start">
+                <div className="flex flex-col items-center gap-4">
+                  <div className="relative">
+                    <img
+                      src={profile.avatar_url}
+                      alt="Profile"
+                      className="w-32 h-32 rounded-full border-4 border-primary/50 ring-2 ring-primary/20 object-cover"
+                    />
+                    <div className="absolute -bottom-2 left-1/2 -translate-x-1/2 bg-black px-3 py-1 rounded-full border border-primary/50">
+                      <span className="text-xs font-black text-primary font-pixel">LVL {profile.level}</span>
+                    </div>
+                  </div>
+                  <Button 
+                    variant="outline" 
+                    size="sm"
+                    className="border-primary/30 text-primary hover:bg-primary/10"
+                    onClick={() => setEditDialogOpen(true)}
+                  >
+                    <Edit className="mr-2 h-3 w-3" />
+                    Editar
+                  </Button>
+                </div>
+
+                <div className="flex-1 space-y-4 text-center md:text-left w-full">
+                  <div>
+                    <h1 className="text-3xl md:text-4xl font-black text-white uppercase tracking-wide mb-2 font-pixel">
+                      {profile.username}
+                    </h1>
+                    <p className="text-sm text-gray-300 italic">"{profile.bio}"</p>
+                  </div>
+
+                  <div className="space-y-2 max-w-md mx-auto md:mx-0">
+                    <div className="flex items-center justify-between text-sm">
+                      <span className="text-primary/70 uppercase tracking-wider font-pixel text-xs">XP Total</span>
+                      <span className="text-primary font-bold font-pixel">{profile.xp} XP</span>
+                    </div>
+                    <Progress value={(profile.xp % 500) / 500 * 100} className="h-3 bg-gray-800" />
+                    <p className="text-xs text-gray-500 text-right">
+                      {500 - (profile.xp % 500)} XP para o próximo nível
+                    </p>
                   </div>
                 </div>
-                <Button 
-                  variant="outline" 
-                  size="sm"
-                  className="border-primary/30 text-primary hover:bg-primary/10"
-                  onClick={() => setEditDialogOpen(true)}
-                >
-                  <Edit className="mr-2 h-3 w-3" />
-                  Editar Perfil
+              </div>
+            </div>
+          </div>
+
+          {/* TOP 3 FAVORITOS */}
+          <div className="glass-panel rounded-2xl border-2 border-primary/30 p-8 bg-black/60">
+            <h2 className="text-2xl font-black text-primary uppercase tracking-wider mb-8 text-center font-pixel">
+              Top 3 Melhores Avaliações
+            </h2>
+            
+            {profile.top_favorites && profile.top_favorites.length > 0 ? (
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
+                {profile.top_favorites.map((game: any, index: number) => (
+                  <div 
+                    key={index}
+                    className="rounded-xl border border-primary/20 p-6 hover:border-primary/60 transition-all relative overflow-hidden group h-[400px] flex flex-col justify-between"
+                  >
+                    <div 
+                      className="absolute inset-0 z-0 opacity-40 group-hover:opacity-60 transition-opacity duration-500"
+                      style={{
+                        backgroundImage: `url(${game.game_image_url})`,
+                        backgroundSize: 'cover',
+                        backgroundPosition: 'center'
+                      }}
+                    />
+                    <div className="absolute inset-0 bg-gradient-to-t from-black via-black/80 to-transparent z-0" />
+                    
+                    <div className="relative z-10 flex flex-col items-center h-full">
+                      <h3 className="text-lg font-bold text-white text-center mb-4 font-pixel truncate w-full px-2">
+                        {game.game_name}
+                      </h3>
+                      
+                      <div className="flex-grow flex items-center justify-center w-full">
+                         <RadarChart
+                          data={{
+                            jogabilidade: game.jogabilidade,
+                            graficos: game.graficos,
+                            narrativa: game.narrativa,
+                            audio: game.audio,
+                            desempenho: game.desempenho
+                          }}
+                          size={180}
+                          showLabels={true}
+                        />
+                      </div>
+                      
+                      <div className="mt-4 bg-primary/20 px-4 py-2 rounded-full border border-primary/50">
+                         <span className="text-xl font-black text-primary font-pixel">{game.nota_geral.toFixed(1)}</span>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="text-center py-10">
+                <p className="text-gray-400 mb-4">Você ainda não avaliou nenhum jogo.</p>
+                <Button onClick={() => navigate("/home")} variant="outline" className="border-primary text-primary">
+                  Começar a Avaliar
                 </Button>
               </div>
-
-              {/* Info Section */}
-              <div className="flex-1 space-y-4">
-                <div>
-                  <h1 
-                    className="text-3xl md:text-4xl font-black text-white uppercase tracking-tight mb-2"
-                    style={{ fontFamily: "'Press Start 2P', cursive" }}
-                  >
-                    NOME
-                  </h1>
-                  <p className="text-sm text-muted-foreground">Membro desde 2024</p>
-                </div>
-
-                {/* XP Progress */}
-                <div className="space-y-2">
-                  <div className="flex items-center justify-between text-sm">
-                    <span className="text-primary/70 uppercase tracking-wider">Progresso de XP</span>
-                    <span className="text-primary font-bold">{xpProgress}%</span>
-                  </div>
-                  <Progress value={xpProgress} className="h-3" />
-                  <p className="text-xs text-muted-foreground">
-                    {100 - xpProgress}% para o próximo nível
-                  </p>
-                </div>
-              </div>
-            </div>
-            </div>
+            )}
           </div>
 
-          {/* Top 3 Favoritos Section */}
-          <div className="glass-panel rounded-2xl border-2 border-primary/30 p-8 shadow-[0_0_30px_hsl(var(--primary)/0.2)]">
-            <h2 className="text-2xl font-black text-primary uppercase tracking-wider mb-8 text-center font-pixel">
-              Top 3 Favoritos
-            </h2>
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
-              {topFavorites.map((game, index) => (
-                <div 
-                  key={index}
-                  className="glass-panel rounded-xl border border-primary/20 p-6 hover:border-primary/40 transition-all relative overflow-hidden"
-                  style={{
-                    backgroundImage: `linear-gradient(rgba(0, 0, 0, 0.7), rgba(0, 0, 0, 0.7)), url(${game.cover})`,
-                    backgroundSize: 'cover',
-                    backgroundPosition: 'center'
-                  }}
-                >
-                  <RadarChart
-                    data={game.ratings}
-                    size={200}
-                    showLabels={true}
-                    title={game.title}
-                  />
-                </div>
-              ))}
-            </div>
-          </div>
-
+          {/* ESTATÍSTICAS */}
           <div className="grid md:grid-cols-3 gap-6">
-            {/* Left Column - Linked Accounts */}
-            <div className="md:col-span-1 space-y-6">
-              <div className="glass-panel rounded-xl border border-primary/20 p-6">
-                <h2 className="text-lg font-black text-primary uppercase tracking-wider mb-4">
-                  Contas Vinculadas
-                </h2>
-                <div className="space-y-3">
-                  {linkedAccounts.map((account) => (
-                    <div
-                      key={account.name}
-                      className="flex items-center justify-between p-3 glass-panel rounded-lg border border-primary/10 hover:border-primary/30 transition-all"
-                    >
-                      <div className="flex items-center gap-3">
-                        <span className="text-2xl">{account.icon}</span>
-                        <span className="text-sm font-medium text-foreground">
-                          {account.name}
-                        </span>
-                      </div>
-                      {account.connected ? (
-                        <Check className="h-4 w-4 text-primary" />
-                      ) : (
-                        <X className="h-4 w-4 text-muted-foreground/50" />
-                      )}
+            <div className="md:col-span-1 glass-panel rounded-xl border border-primary/20 p-6 bg-black/60">
+              <h2 className="text-lg font-black text-primary uppercase tracking-wider mb-4 font-pixel">
+                Plataformas
+              </h2>
+              <div className="space-y-3">
+                {PLATFORMS.map((platform) => (
+                  <div
+                    key={platform.key}
+                    className="flex items-center justify-between p-3 rounded-lg border border-white/10 bg-white/5"
+                  >
+                    <div className="flex items-center gap-3">
+                      <img 
+                        src={platform.icon} 
+                        alt={platform.name}
+                        className="w-6 h-6 object-contain"
+                        onError={(e) => { e.currentTarget.style.display = 'none'; e.currentTarget.nextElementSibling?.classList.remove('hidden'); }} 
+                      />
+                      <span className="hidden text-xl">🎮</span>
+                      <span className="text-sm font-medium text-gray-200">
+                        {platform.name}
+                      </span>
                     </div>
-                  ))}
-                </div>
+                    {profile.stats.accounts[platform.key] ? (
+                      <Check className="h-4 w-4 text-primary" />
+                    ) : (
+                      <Button variant="ghost" size="sm" className="h-6 text-[10px] text-gray-400 hover:text-white">
+                        Conectar
+                      </Button>
+                    )}
+                  </div>
+                ))}
               </div>
             </div>
 
-            {/* Right Column - Stats & Achievements */}
-            <div className="md:col-span-2 space-y-6">
-              {/* Stats */}
-              <div className="glass-panel rounded-xl border border-primary/20 p-6">
-                <h2 className="text-lg font-black text-primary uppercase tracking-wider mb-4">
-                  Estatísticas
-                </h2>
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                  {stats.map((stat) => (
-                    <div
-                      key={stat.label}
-                      className="glass-panel rounded-lg border border-primary/10 p-4 hover:border-primary/30 transition-all"
-                    >
-                      <stat.icon className="h-5 w-5 text-primary/60 mb-2" />
-                      <p className="text-2xl font-black text-primary mb-1">{stat.value}</p>
-                      <p className="text-xs text-muted-foreground uppercase tracking-wider">
-                        {stat.label}
-                      </p>
-                    </div>
-                  ))}
+            <div className="md:col-span-2 glass-panel rounded-xl border border-primary/20 p-6 bg-black/60">
+              <h2 className="text-lg font-black text-primary uppercase tracking-wider mb-4 font-pixel">
+                Estatísticas da Carreira
+              </h2>
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                <div className="rounded-lg border border-primary/10 p-4 bg-white/5 flex flex-col items-center justify-center text-center hover:border-primary/30 transition-colors">
+                  <TrendingUp className="h-6 w-6 text-primary mb-2" />
+                  <p className="text-3xl font-black text-white font-pixel">{profile.stats.reviews_count}</p>
+                  <p className="text-xs text-gray-400 uppercase tracking-wider mt-1">Jogos Avaliados</p>
                 </div>
-              </div>
 
-              {/* Achievements */}
-              <div className="glass-panel rounded-xl border border-primary/20 p-6">
-                <h2 className="text-lg font-black text-primary uppercase tracking-wider mb-4">
-                  Conquistas
-                </h2>
-                <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
-                  {achievements.map((achievement) => (
-                    <div
-                      key={achievement.name}
-                      className={`glass-panel rounded-lg border p-4 text-center transition-all ${
-                        achievement.unlocked
-                          ? "border-primary/30 hover:border-primary/50"
-                          : "border-primary/10 grayscale opacity-50"
-                      }`}
-                    >
-                      <div className="text-4xl mb-2">{achievement.icon}</div>
-                      <p className={`text-xs font-medium uppercase tracking-wider ${
-                        achievement.unlocked ? "text-foreground" : "text-muted-foreground"
-                      }`}>
-                        {achievement.name}
-                      </p>
-                    </div>
-                  ))}
+                <div className="rounded-lg border border-primary/10 p-4 bg-white/5 flex flex-col items-center justify-center text-center hover:border-primary/30 transition-colors">
+                  <Star className="h-6 w-6 text-primary mb-2" />
+                  <p className="text-3xl font-black text-white font-pixel">{userAverage}</p>
+                  <p className="text-xs text-gray-400 uppercase tracking-wider mt-1">Média de Notas</p>
+                </div>
+
+                <div className="rounded-lg border border-primary/10 p-4 bg-white/5 flex flex-col items-center justify-center text-center hover:border-primary/30 transition-colors">
+                  <Award className="h-6 w-6 text-primary mb-2" />
+                  <p className="text-xl font-bold text-white font-pixel mt-1">RPG</p>
+                  <p className="text-xs text-gray-400 uppercase tracking-wider mt-1">Gênero Favorito</p>
                 </div>
               </div>
             </div>
           </div>
         </div>
 
-        {/* Edit Profile Dialog */}
         <EditProfileDialog 
           open={editDialogOpen} 
           onOpenChange={setEditDialogOpen}
+          currentBio={profile.bio}
+          onProfileUpdate={fetchProfile} 
         />
       </div>
     </div>
