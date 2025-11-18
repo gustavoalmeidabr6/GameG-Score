@@ -70,6 +70,7 @@ function CircularProgress({ value, max, size = 80, strokeWidth = 8, color = '#3b
             strokeLinecap="round"
           />
         </svg>
+        
         {showValue && (
           <div className="absolute inset-0 flex flex-col items-center justify-center text-white pointer-events-none">
             {icon && <div className="mb-1 text-gray-400">{icon}</div>}
@@ -77,6 +78,7 @@ function CircularProgress({ value, max, size = 80, strokeWidth = 8, color = '#3b
           </div>
         )}
       </div>
+      
       {label && (
         <span className="text-xs font-bold text-gray-400 uppercase tracking-wider font-pixel">
           {label}
@@ -86,6 +88,7 @@ function CircularProgress({ value, max, size = 80, strokeWidth = 8, color = '#3b
   );
 }
 
+// --- PÁGINA PRINCIPAL DE DETALHES ---
 const GameDetails = () => {
   const { id } = useParams(); 
   const navigate = useNavigate();
@@ -108,7 +111,7 @@ const GameDetails = () => {
 
     const loadData = async () => {
       setLoading(true);
-      const userId = localStorage.getItem("userId");
+      const userId = localStorage.getItem("userId") || "1"; 
 
       try {
         const gameRes = await fetch(`/api/game/${id}`);
@@ -122,23 +125,22 @@ const GameDetails = () => {
           return;
         }
 
-        if (userId) {
-          const reviewRes = await fetch(`/api/review?game_id=${id}&owner_id=${userId}`);
-          const reviewData = await reviewRes.json();
+        const reviewRes = await fetch(`/api/review?game_id=${id}&owner_id=${userId}`);
+        const reviewData = await reviewRes.json();
 
-          if (!reviewData.error) {
-            setReview({
-              jogabilidade: reviewData.jogabilidade,
-              graficos: reviewData.graficos,
-              narrativa: reviewData.narrativa,
-              audio: reviewData.audio,
-              desempenho: reviewData.desempenho,
-            });
-            setAverageScore(reviewData.nota_geral);
-          }
+        if (!reviewData.error) {
+          setReview({
+            jogabilidade: reviewData.jogabilidade,
+            graficos: reviewData.graficos,
+            narrativa: reviewData.narrativa,
+            audio: reviewData.audio,
+            desempenho: reviewData.desempenho,
+          });
+          setAverageScore(reviewData.nota_geral);
         }
       } catch (error) {
         console.error("Erro ao carregar dados:", error);
+        toast.error("Erro ao carregar informações.");
       } finally {
         setLoading(false);
       }
@@ -155,7 +157,7 @@ const GameDetails = () => {
     setAverageScore(newAverage);
   };
 
- const handleSubmitReview = async () => {
+  const handleSubmitReview = async () => {
     if (!game) return;
     const userId = localStorage.getItem("userId");
 
@@ -168,9 +170,10 @@ const GameDetails = () => {
     const reviewData = { 
       ...review, 
       game_id: game.id, 
-      game_name: game.name, 
-      // Se não tiver imagem, envia string vazia para não quebrar
-      game_image_url: game.image?.medium_url || "", 
+      game_name: game.name,
+      // --- AQUI ESTÁ A CORREÇÃO: Enviamos a imagem ---
+      game_image_url: game.image?.medium_url || "",
+      // ----------------------------------------------
       owner_id: parseInt(userId)
     };
     
@@ -184,15 +187,16 @@ const GameDetails = () => {
       if (response.ok) {
         toast.success("Review salva com sucesso!");
       } else {
-        const errorData = await response.json(); // Pega a mensagem de erro do backend
-        console.error(errorData); // Mostra no console
-        toast.error("Erro ao salvar review: " + (errorData.error || "Erro desconhecido"));
+        // Mostramos o erro real se houver
+        const errorData = await response.json();
+        console.error(errorData);
+        toast.error("Erro ao salvar review.");
       }
     } catch (error) {
       toast.error("Falha na conexão.");
     }
   };
-  
+
   if (loading) {
     return (
       <div className="min-h-screen bg-[#0A0A0A] flex items-center justify-center text-white font-pixel">
@@ -205,6 +209,7 @@ const GameDetails = () => {
 
   return (
     <div className="min-h-screen bg-[#0A0A0A] text-white font-sans pb-20">
+      
       <div 
         className="fixed inset-0 z-0 opacity-20 blur-sm"
         style={{
@@ -215,6 +220,7 @@ const GameDetails = () => {
       />
 
       <div className="relative z-10 max-w-6xl mx-auto px-4 pt-8">
+        
         <Button 
           onClick={() => navigate("/home")}
           variant="ghost" 
@@ -224,6 +230,7 @@ const GameDetails = () => {
         </Button>
 
         <div className="bg-[#121214]/90 border border-[#3bbe5d]/30 rounded-xl p-8 shadow-2xl backdrop-blur-md">
+          
           <div className="flex flex-col md:flex-row gap-8">
             <div className="w-full md:w-1/3 lg:w-1/4 flex-shrink-0">
               <div className="aspect-[3/4] rounded-lg overflow-hidden border-2 border-[#3bbe5d]/20 shadow-[0_0_20px_rgba(59,190,93,0.1)]">
@@ -255,9 +262,12 @@ const GameDetails = () => {
           <div className="h-px bg-gradient-to-r from-transparent via-[#3bbe5d]/30 to-transparent my-10" />
 
           <div className="grid lg:grid-cols-2 gap-12 items-center">
+            
+            {/* Mini Gráficos (Esquerda) */}
             <div className="grid grid-cols-2 sm:grid-cols-3 gap-y-8 gap-x-4">
               {(Object.keys(defaultReviewState) as Array<keyof ReviewForm>).map((key) => (
                 <div key={key} className="flex flex-col items-center group">
+                  
                   <div className="relative flex items-center justify-center" style={{ width: 80, height: 80 }}>
                     <CircularProgress 
                       value={review[key]} 
@@ -268,6 +278,8 @@ const GameDetails = () => {
                       showValue={true} 
                     />
                   </div>
+                  
+                  {/* Slider Visível Embaixo */}
                   <input
                     type="range"
                     min="0"
@@ -277,6 +289,7 @@ const GameDetails = () => {
                     onChange={(e) => handleReviewChange(key, Number(e.target.value))}
                     className="w-full h-2 mt-4 bg-gray-700 rounded-lg appearance-none cursor-pointer accent-[#3bbe5d]" 
                   />
+
                   <span className="mt-2 text-xs font-bold text-gray-500 group-hover:text-[#3bbe5d] transition-colors font-pixel uppercase">
                     {key}
                   </span>
@@ -284,12 +297,13 @@ const GameDetails = () => {
               ))}
             </div>
 
+            {/* Gráfico Geral (Direita) */}
             <div className="flex flex-col items-center justify-center p-8 bg-black/20 rounded-2xl border border-white/5">
               <div className="mb-6 relative">
                 <CircularProgress 
                   value={averageScore || 0} 
                   max={10} 
-                  size={160} 
+                  size={160}
                   strokeWidth={12}
                   color="#3bbe5d" 
                   showValue={false} 
@@ -309,6 +323,7 @@ const GameDetails = () => {
                 SALVAR REVIEW
               </Button>
             </div>
+
           </div>
         </div>
       </div>
