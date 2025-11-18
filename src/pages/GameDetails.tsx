@@ -155,7 +155,7 @@ const GameDetails = () => {
     setAverageScore(newAverage);
   };
 
-  const handleSubmitReview = async () => {
+ const handleSubmitReview = async () => {
     if (!game) return;
     const userId = localStorage.getItem("userId");
 
@@ -168,8 +168,9 @@ const GameDetails = () => {
     const reviewData = { 
       ...review, 
       game_id: game.id, 
-      game_name: game.name,
-      game_image_url: game.image.medium_url, // --- CORREÇÃO AQUI: Adicionada a URL da imagem ---
+      game_name: game.name, 
+      // Se não tiver imagem, envia string vazia para não quebrar
+      game_image_url: game.image?.medium_url || "", 
       owner_id: parseInt(userId)
     };
     
@@ -183,13 +184,15 @@ const GameDetails = () => {
       if (response.ok) {
         toast.success("Review salva com sucesso!");
       } else {
-        toast.error("Erro ao salvar review.");
+        const errorData = await response.json(); // Pega a mensagem de erro do backend
+        console.error(errorData); // Mostra no console
+        toast.error("Erro ao salvar review: " + (errorData.error || "Erro desconhecido"));
       }
     } catch (error) {
       toast.error("Falha na conexão.");
     }
   };
-
+  
   if (loading) {
     return (
       <div className="min-h-screen bg-[#0A0A0A] flex items-center justify-center text-white font-pixel">
