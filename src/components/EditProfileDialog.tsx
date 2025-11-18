@@ -1,11 +1,9 @@
 import { useState } from "react";
-import {
-  Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle,
-} from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { User, Image as ImageIcon, Upload } from "lucide-react";
+import { User, Upload } from "lucide-react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 import { toast } from "sonner";
@@ -17,7 +15,6 @@ interface EditProfileDialogProps {
   onProfileUpdate: () => void;
 }
 
-// Presets de Banner (URLs públicas)
 const presetBanners = [
   "https://images.unsplash.com/photo-1511882150382-421056c89033?w=1920&h=400&fit=crop",
   "https://images.unsplash.com/photo-1579546929518-9e396f3cc809?w=1920&h=400&fit=crop",
@@ -31,11 +28,10 @@ export const EditProfileDialog = ({ open, onOpenChange, currentBio, onProfileUpd
   const [selectedBanner, setSelectedBanner] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
-  // Função para converter arquivo em Base64
   const handleAvatarUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
-      if (file.size > 1024 * 1024 * 2) { // Limite de 2MB (Strings base64 são grandes!)
+      if (file.size > 1024 * 1024 * 2) { 
         toast.error("A imagem deve ter menos de 2MB.");
         return;
       }
@@ -64,7 +60,7 @@ export const EditProfileDialog = ({ open, onOpenChange, currentBio, onProfileUpd
 
       if (response.ok) {
         toast.success("Perfil atualizado!");
-        onProfileUpdate(); // Atualiza a tela de perfil
+        onProfileUpdate(); 
         onOpenChange(false);
       } else {
         toast.error("Erro ao atualizar perfil.");
@@ -92,7 +88,6 @@ export const EditProfileDialog = ({ open, onOpenChange, currentBio, onProfileUpd
             <TabsTrigger value="banner">Banner</TabsTrigger>
           </TabsList>
 
-          {/* ABA INFO (BIO) */}
           <TabsContent value="info" className="space-y-4 py-4">
             <div className="space-y-2">
               <Label>Bio / Sobre Mim</Label>
@@ -105,7 +100,6 @@ export const EditProfileDialog = ({ open, onOpenChange, currentBio, onProfileUpd
             </div>
           </TabsContent>
 
-          {/* ABA AVATAR (UPLOAD) */}
           <TabsContent value="avatar" className="space-y-4 py-4">
             <div className="flex flex-col items-center gap-4">
               {avatarPreview ? (
@@ -127,7 +121,6 @@ export const EditProfileDialog = ({ open, onOpenChange, currentBio, onProfileUpd
             </div>
           </TabsContent>
 
-          {/* ABA BANNER (PRESETS) */}
           <TabsContent value="banner" className="space-y-4 py-4">
             <div className="grid grid-cols-2 gap-3">
               {presetBanners.map((banner, index) => (
