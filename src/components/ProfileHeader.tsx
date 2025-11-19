@@ -1,6 +1,6 @@
 import { Badge } from "@/components/ui/badge";
 import { Crown, Zap } from "lucide-react";
-import defaultBanner from "@/assets/BANNER1.PNG";
+import defaultBanner from "@/assets/BANNER1.png";
 import defaultAvatar from "@/assets/defaultprofile.png";
 
 interface ProfileHeaderProps {
