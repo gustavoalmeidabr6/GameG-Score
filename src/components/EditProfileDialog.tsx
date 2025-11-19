@@ -9,10 +9,10 @@ import { Textarea } from "@/components/ui/textarea";
 import { toast } from "sonner";
 
 // --- IMPORTANDO OS NOVOS ASSETS LOCAIS ---
-import banner1 from "@/assets/BANNER1.PNG";
-import banner2 from "@/assets/BANNER2.PNG";
-import banner3 from "@/assets/BANNER3.PNG";
-import banner4 from "@/assets/BANNER4.PNG";
+import banner1 from "@/assets/BANNER1.png";
+import banner2 from "@/assets/BANNER2.png";
+import banner3 from "@/assets/BANNER3.png";
+import banner4 from "@/assets/BANNER4.png";
 import defaultProfileImg from "@/assets/defaultprofile.png";
 
 interface EditProfileDialogProps {
