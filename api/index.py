@@ -41,8 +41,7 @@ class User(Base):
     username = Column(String, unique=True, index=True, nullable=False)
     nickname = Column(String, default="") 
     hashed_password = Column(String, nullable=False)
-    # MUDANÇA AQUI: Bio padrão atualizada
-    bio = Column(String, default="Insira sua bio") 
+    bio = Column(String, default="Insira sua bio")
     avatar_url = Column(Text, default="") 
     banner_url = Column(String, default="")
     xp = Column(Integer, default=0)
@@ -150,7 +149,6 @@ def register(user: UserCreate, db: Session = Depends(get_db)):
     if db.query(User).filter(User.username == user.username).first():
         raise HTTPException(status_code=400, detail="Nome de usuário já existe")
     hashed_pw = get_password_hash(user.password)
-    # Nickname igual ao username, avatar e banner vazios (front decide)
     new_user = User(email=user.email, username=user.username, nickname=user.username, hashed_password=hashed_pw, avatar_url="", banner_url="")
     db.add(new_user)
     db.commit()
@@ -272,6 +270,23 @@ def search_users(q: str, db: Session = Depends(get_db)):
         })
     return results
 
+# --- NOVA ROTA: RANKING GLOBAL ---
+@app.get("/api/users/top")
+def get_top_users(db: Session = Depends(get_db)):
+    # Pega os 10 usuários com mais XP
+    users = db.query(User).order_by(desc(User.xp)).limit(10).all()
+    results = []
+    for u in users:
+        results.append({
+            "id": u.id, 
+            "username": u.username, 
+            "nickname": u.nickname or u.username,
+            "avatar_url": u.avatar_url, 
+            "level": u.level,
+            "xp": u.xp
+        })
+    return results
+
 @app.put("/api/profile/update")
 def update_profile(data: UserUpdate, db: Session = Depends(get_db)):
     user = db.query(User).filter(User.id == data.user_id).first()
@@ -345,7 +360,9 @@ def get_tierlists(user_id: int, db: Session = Depends(get_db)):
     result = []
     for t in tierlists:
         try:
-            result.append({"id": t.id, "name": t.name, "data": json.loads(t.data)})
+            # Garante que se data for None ou vazio, não quebre
+            loaded_data = json.loads(t.data) if t.data else {}
+            result.append({ "id": t.id, "name": t.name, "data": loaded_data })
         except: pass
     return result
 
