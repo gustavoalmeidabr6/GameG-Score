@@ -7,7 +7,6 @@ import { Search } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { toast } from "sonner";
 
-// Tipo para os jogos da API
 type GameSearchResult = {
   id: number;
   name: string;
@@ -17,7 +16,6 @@ type GameSearchResult = {
   };
 };
 
-// A lista de jogos que você pediu
 const RELEVANT_GAMES = [
   "Elden Ring",
   "Red Dead Redemption 2",
@@ -34,52 +32,79 @@ const Index = () => {
   const [games, setGames] = useState<GameSearchResult[]>([]);
   const [loading, setLoading] = useState(false);
   const [username, setUsername] = useState("Visitante");
-  const [isSearching, setIsSearching] = useState(false); // Para controlar o título da secção
+  const [isSearching, setIsSearching] = useState(false);
+  const [userProfile, setUserProfile] = useState<any>(null);
+  
   const navigate = useNavigate();
 
-  // 1. Carregar dados iniciais ao abrir a página
   useEffect(() => {
-    // Pegar nome do usuário salvo no login
-    const savedName = localStorage.getItem("username");
-    if (savedName) setUsername(savedName);
+    const fetchUserData = async () => {
+      const userId = localStorage.getItem("userId");
+      if (userId) {
+        try {
+          const response = await fetch(`/api/profile/${userId}`);
+          if (response.ok) {
+            const data = await response.json();
+            setUserProfile(data);
+            setUsername(data.username);
+          } else {
+            console.warn("Sessão inválida detectada. Realizando logout...");
+            localStorage.clear();
+            navigate("/");
+          }
+        } catch (error) {
+          console.error("Erro ao carregar perfil na home:", error);
+        }
+      }
+    };
 
-    // Carregar os jogos relevantes automaticamente
+    fetchUserData();
     loadRelevantGames();
   }, []);
 
-  // Nova função para carregar a lista fixa usando a API
   const loadRelevantGames = async () => {
+    const cachedGames = localStorage.getItem("cached_popular_games");
+    if (cachedGames) {
+      setGames(JSON.parse(cachedGames));
+      setLoading(false);
+      return; 
+    }
+
     setLoading(true);
     setIsSearching(false);
-    try {
-      // Fazemos várias promessas (requests) ao mesmo tempo
-      const promises = RELEVANT_GAMES.map(async (gameName) => {
-        const response = await fetch(`/api/search?q=${encodeURIComponent(gameName)}`);
-        const data = await response.json();
-        // Retorna o primeiro resultado encontrado para cada nome
-        return Array.isArray(data) && data.length > 0 ? data[0] : null;
-      });
+    const loadedGames: GameSearchResult[] = [];
 
-      // Espera todos responderem
-      const results = await Promise.all(promises);
-      
-      // Filtra os nulos (caso algum jogo não seja encontrado)
-      const validGames = results.filter((game) => game !== null) as GameSearchResult[];
-      setGames(validGames);
+    try {
+      for (const gameName of RELEVANT_GAMES) {
+        try {
+          const response = await fetch(`/api/search?q=${encodeURIComponent(gameName)}`);
+          const data = await response.json();
+          if (Array.isArray(data) && data.length > 0) {
+            loadedGames.push(data[0]);
+            setGames([...loadedGames]); 
+          }
+          await new Promise(resolve => setTimeout(resolve, 1000));
+        } catch (err) {
+          console.error(`Erro ao carregar ${gameName}`, err);
+        }
+      }
+
+      if (loadedGames.length > 0) {
+        localStorage.setItem("cached_popular_games", JSON.stringify(loadedGames));
+      }
 
     } catch (error) {
-      console.error("Erro ao carregar jogos relevantes:", error);
-      toast.error("Erro ao carregar jogos iniciais.");
+      console.error("Erro geral ao carregar jogos:", error);
+      toast.error("Erro ao carregar lista de jogos.");
     } finally {
       setLoading(false);
     }
   };
 
-  // 2. Função de busca manual (quando o usuário digita)
   const searchGames = async (searchTerm: string) => {
     if (!searchTerm) return;
     setLoading(true);
-    setIsSearching(true); // Mudamos para modo de busca
+    setIsSearching(true);
     try {
       const response = await fetch(`/api/search?q=${searchTerm}`);
       const data = await response.json();
@@ -94,25 +119,22 @@ const Index = () => {
     }
   };
 
-  // 3. Lidar com o Submit da busca (Enter ou Clique)
   const handleSearchSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (query.trim() === "") {
-      // Se a busca estiver vazia, recarrega os relevantes
+      setGames([]); 
       loadRelevantGames();
     } else {
       searchGames(query);
     }
   };
 
-  // 4. Ir para a página de detalhes
   const handleGameClick = (id: number) => {
     navigate(`/game/${id}`);
   };
 
   return (
     <div className="min-h-screen relative pb-12 font-sans">
-      {/* Background */}
       <div 
         className="fixed inset-0 z-0"
         style={{
@@ -125,22 +147,21 @@ const Index = () => {
         <div className="absolute inset-0 bg-background/80" />
       </div>
       
-      {/* Content */}
       <div className="relative z-10">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 space-y-8 pt-8">
           
-          {/* Profile Header */}
           <ProfileHeader
-            username={username}
-            level={1}
-            rank="INICIANTE"
-            avatarUrl="https://images.unsplash.com/photo-1633332755192-727a05c4013d?w=200&h=200&fit=crop"
+            username={userProfile?.nickname || userProfile?.username || username}
+            level={userProfile?.level || 1}
+            rank={userProfile ? `XP: ${userProfile.xp}` : "INICIANTE"}
+            xp={userProfile?.xp || 0}
+            // CORREÇÃO AQUI: Removemos o link do Unsplash. Se for vazio, o componente usa o defaultprofile.png
+            avatarUrl={userProfile?.avatar_url || ""} 
+            bannerUrl={userProfile?.banner_url}
           />
 
-          {/* Menu e Busca */}
           <div className="flex flex-col md:flex-row items-center justify-between gap-4">
             
-            {/* Barra de Pesquisa Funcional */}
             <form onSubmit={handleSearchSubmit} className="relative w-full md:w-96">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
               <Input
@@ -155,7 +176,6 @@ const Index = () => {
             <NavigationMenu />
           </div>
 
-          {/* Área de Jogos */}
           <div className="relative rounded-2xl p-6 md:p-8 mt-8" style={{
             background: 'linear-gradient(180deg, #0A0A0A 0%, rgba(10, 10, 10, 0.95) 50%, rgba(10, 10, 10, 0.85) 100%)',
           }}>
@@ -167,7 +187,6 @@ const Index = () => {
                 <div className="absolute -bottom-2 left-0 right-0 h-1 bg-gradient-to-r from-primary via-gaming-glow to-primary neon-glow" />
               </div>
               
-              {/* Grid de Jogos */}
               <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6">
                 {games.map((game) => (
                   <div 
@@ -175,7 +194,6 @@ const Index = () => {
                     onClick={() => handleGameClick(game.id)}
                     className="group relative aspect-[3/4] overflow-hidden rounded-lg border border-white/10 bg-black/40 transition-all hover:border-gaming-neon/50 hover:shadow-[0_0_30px_-5px_rgba(59,190,93,0.3)] cursor-pointer"
                   >
-                    {/* Imagem do Jogo */}
                     <div className="absolute inset-0">
                       {game.image?.medium_url ? (
                         <img
@@ -188,11 +206,9 @@ const Index = () => {
                           Sem Imagem
                         </div>
                       )}
-                      {/* Gradiente sobre a imagem */}
                       <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/20 to-transparent opacity-80 transition-opacity group-hover:opacity-60" />
                     </div>
 
-                    {/* Título do Jogo */}
                     <div className="absolute bottom-0 left-0 right-0 p-4 translate-y-2 group-hover:translate-y-0 transition-transform">
                       <h3 className="font-bold text-white text-lg leading-tight line-clamp-2 group-hover:text-gaming-neon transition-colors font-sans">
                         {game.name}
