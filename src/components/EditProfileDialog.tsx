@@ -1,32 +1,58 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { User, Upload } from "lucide-react";
+import { User, Upload, Link as LinkIcon } from "lucide-react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 import { toast } from "sonner";
+
+// --- IMPORTANDO OS NOVOS ASSETS LOCAIS ---
+import banner1 from "@/assets/BANNER1.PNG";
+import banner2 from "@/assets/BANNER2.PNG";
+import banner3 from "@/assets/BANNER3.PNG";
+import banner4 from "@/assets/BANNER4.PNG";
+import defaultProfileImg from "@/assets/defaultprofile.png";
 
 interface EditProfileDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   currentBio?: string;
+  currentUsername?: string;
+  currentNickname?: string; 
+  currentSocial?: { steam?: string, xbox?: string, psn?: string, epic?: string };
   onProfileUpdate: () => void;
 }
 
-const presetBanners = [
-  "https://images.unsplash.com/photo-1511882150382-421056c89033?w=1920&h=400&fit=crop",
-  "https://images.unsplash.com/photo-1579546929518-9e396f3cc809?w=1920&h=400&fit=crop",
-  "https://images.unsplash.com/photo-1552820728-8b83bb6b773f?w=1920&h=400&fit=crop",
-  "https://images.unsplash.com/photo-1614726365723-49cfae56242d?w=1920&h=400&fit=crop",
-];
+// Agora usamos as imagens importadas
+const presetBanners = [banner1, banner2, banner3, banner4];
 
-export const EditProfileDialog = ({ open, onOpenChange, currentBio, onProfileUpdate }: EditProfileDialogProps) => {
+export const EditProfileDialog = ({ open, onOpenChange, currentBio, currentUsername, currentNickname, currentSocial, onProfileUpdate }: EditProfileDialogProps) => {
   const [bio, setBio] = useState(currentBio || "");
+  const [username, setUsername] = useState(currentUsername || "");
+  const [nickname, setNickname] = useState(currentNickname || ""); 
   const [avatarPreview, setAvatarPreview] = useState<string | null>(null);
   const [selectedBanner, setSelectedBanner] = useState<string | null>(null);
+  
+  const [steamUrl, setSteamUrl] = useState("");
+  const [xboxUrl, setXboxUrl] = useState("");
+  const [psnUrl, setPsnUrl] = useState("");
+  const [epicUrl, setEpicUrl] = useState("");
+
   const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    setBio(currentBio || "");
+    setUsername(currentUsername || "");
+    setNickname(currentNickname || currentUsername || ""); 
+    if (currentSocial) {
+      setSteamUrl(currentSocial.steam || "");
+      setXboxUrl(currentSocial.xbox || "");
+      setPsnUrl(currentSocial.psn || "");
+      setEpicUrl(currentSocial.epic || "");
+    }
+  }, [currentBio, currentUsername, currentNickname, currentSocial, open]);
 
   const handleAvatarUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -47,7 +73,17 @@ export const EditProfileDialog = ({ open, onOpenChange, currentBio, onProfileUpd
     setLoading(true);
     const userId = localStorage.getItem("userId");
     
-    const updateData: any = { user_id: userId, bio };
+    const updateData: any = { 
+      user_id: userId, 
+      username, 
+      nickname,
+      bio,
+      steam_url: steamUrl,
+      xbox_url: xboxUrl,
+      psn_url: psnUrl,
+      epic_url: epicUrl
+    };
+
     if (avatarPreview) updateData.avatar_url = avatarPreview;
     if (selectedBanner) updateData.banner_url = selectedBanner;
 
@@ -58,12 +94,15 @@ export const EditProfileDialog = ({ open, onOpenChange, currentBio, onProfileUpd
         body: JSON.stringify(updateData),
       });
 
+      const resData = await response.json();
+
       if (response.ok) {
         toast.success("Perfil atualizado!");
+        localStorage.setItem("username", username);
         onProfileUpdate(); 
         onOpenChange(false);
       } else {
-        toast.error("Erro ao atualizar perfil.");
+        toast.error(resData.detail || "Erro ao atualizar perfil.");
       }
     } catch (error) {
       toast.error("Erro de conexão.");
@@ -82,13 +121,32 @@ export const EditProfileDialog = ({ open, onOpenChange, currentBio, onProfileUpd
         </DialogHeader>
         
         <Tabs defaultValue="info" className="w-full">
-          <TabsList className="grid w-full grid-cols-3 bg-black/50">
+          <TabsList className="grid w-full grid-cols-4 bg-black/50">
             <TabsTrigger value="info">Info</TabsTrigger>
+            <TabsTrigger value="social">Social</TabsTrigger>
             <TabsTrigger value="avatar">Avatar</TabsTrigger>
             <TabsTrigger value="banner">Banner</TabsTrigger>
           </TabsList>
 
           <TabsContent value="info" className="space-y-4 py-4">
+            <div className="space-y-2">
+              <Label>Nome de Usuário (Login)</Label>
+              <Input 
+                value={username} 
+                onChange={(e) => setUsername(e.target.value)} 
+                className="bg-black/30 border-gray-700 text-white"
+                placeholder="Seu login"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label>Nick de Perfil (Exibição)</Label>
+              <Input 
+                value={nickname} 
+                onChange={(e) => setNickname(e.target.value)} 
+                className="bg-black/30 border-gray-700 text-white"
+                placeholder="Como você quer ser chamado"
+              />
+            </div>
             <div className="space-y-2">
               <Label>Bio / Sobre Mim</Label>
               <Textarea 
@@ -100,13 +158,47 @@ export const EditProfileDialog = ({ open, onOpenChange, currentBio, onProfileUpd
             </div>
           </TabsContent>
 
+          <TabsContent value="social" className="space-y-4 py-4">
+            <div className="space-y-3">
+              <div className="space-y-1">
+                <Label>Link Steam</Label>
+                <div className="flex items-center gap-2">
+                  <LinkIcon className="w-4 h-4 text-gray-500" />
+                  <Input value={steamUrl} onChange={(e) => setSteamUrl(e.target.value)} placeholder="https://steamcommunity.com/id/seu-perfil" className="bg-black/30" />
+                </div>
+              </div>
+              <div className="space-y-1">
+                <Label>Link Xbox</Label>
+                <div className="flex items-center gap-2">
+                  <LinkIcon className="w-4 h-4 text-gray-500" />
+                  <Input value={xboxUrl} onChange={(e) => setXboxUrl(e.target.value)} placeholder="https://xbox.com/..." className="bg-black/30" />
+                </div>
+              </div>
+              <div className="space-y-1">
+                <Label>Link PSN</Label>
+                <div className="flex items-center gap-2">
+                  <LinkIcon className="w-4 h-4 text-gray-500" />
+                  <Input value={psnUrl} onChange={(e) => setPsnUrl(e.target.value)} placeholder="https://my.playstation.com/..." className="bg-black/30" />
+                </div>
+              </div>
+              <div className="space-y-1">
+                <Label>Link Epic Games</Label>
+                <div className="flex items-center gap-2">
+                  <LinkIcon className="w-4 h-4 text-gray-500" />
+                  <Input value={epicUrl} onChange={(e) => setEpicUrl(e.target.value)} placeholder="Seu link ou user" className="bg-black/30" />
+                </div>
+              </div>
+            </div>
+          </TabsContent>
+
           <TabsContent value="avatar" className="space-y-4 py-4">
             <div className="flex flex-col items-center gap-4">
               {avatarPreview ? (
                 <img src={avatarPreview} className="w-32 h-32 rounded-full border-4 border-primary object-cover" />
               ) : (
                 <div className="w-32 h-32 rounded-full border-2 border-dashed border-gray-600 flex items-center justify-center">
-                  <User className="text-gray-500 w-12 h-12" />
+                   {/* Mostra o Default se não tiver preview */}
+                   <img src={defaultProfileImg} className="w-full h-full rounded-full opacity-50" />
                 </div>
               )}
               
