@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Menu, Home, User, BarChart3, List, LogOut } from "lucide-react";
+import { Menu, Home, User, BarChart3, List, LogOut, Users } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -16,13 +16,17 @@ export const NavigationMenu = () => {
   const menuItems = [
     { icon: Home, label: "Tela Principal", href: "/home" },
     { icon: User, label: "Perfil", href: "/profile" },
+    { icon: Users, label: "Comunidade", href: "/community" }, // NOVO ITEM
     { icon: BarChart3, label: "Estatísticas", href: "/statistics" },
     { icon: List, label: "Tierlist", href: "/tierlist" },
-    { icon: LogOut, label: "Sair", href: "/" },
+    { icon: LogOut, label: "Sair", href: "/", isLogout: true },
   ];
 
-  const handleNavigate = (href: string) => {
-    navigate(href);
+  const handleNavigate = (item: any) => {
+    if (item.isLogout) {
+      localStorage.clear();
+    }
+    navigate(item.href);
     setOpen(false);
   };
 
@@ -45,11 +49,11 @@ export const NavigationMenu = () => {
           {menuItems.map((item) => (
             <DropdownMenuItem 
               key={item.label}
-              onClick={() => handleNavigate(item.href)}
-              className="group px-4 py-2.5 cursor-pointer transition-all hover:bg-primary/5 focus:bg-primary/5"
+              onClick={() => handleNavigate(item)}
+              className={`group px-4 py-2.5 cursor-pointer transition-all hover:bg-primary/5 focus:bg-primary/5 ${item.isLogout ? 'text-red-400 hover:text-red-300' : ''}`}
             >
               <div className="flex items-center gap-3 w-full">
-                <item.icon className="h-4 w-4 text-primary/60 group-hover:text-primary transition-colors" />
+                <item.icon className={`h-4 w-4 ${item.isLogout ? 'text-red-400' : 'text-primary/60'} group-hover:text-primary transition-colors`} />
                 <span className="text-sm font-medium text-foreground">
                   {item.label}
                 </span>
