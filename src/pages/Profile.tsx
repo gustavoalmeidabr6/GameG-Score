@@ -59,7 +59,10 @@ export default function Profile() {
       // 2. Buscar todos os jogos avaliados (Biblioteca)
       const gamesRes = await fetch(`/api/user_games/${targetId}`);
       if (gamesRes.ok) {
-        setAllGames(await gamesRes.json());
+        const gamesData = await gamesRes.json();
+        // --- ALTERAÇÃO AQUI: Ordenar por nota (maior para menor) ---
+        gamesData.sort((a: any, b: any) => (b.nota_geral || 0) - (a.nota_geral || 0));
+        setAllGames(gamesData);
       }
 
       // 3. Buscar Tierlists
