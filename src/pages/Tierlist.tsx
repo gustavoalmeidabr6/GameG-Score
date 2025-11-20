@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
-import { useNavigate } from "react-router-dom";
-import { ArrowLeft, Plus, GripVertical, Save, Eye, Trash2 } from "lucide-react";
+import { useNavigate, useSearchParams } from "react-router-dom";
+import { ArrowLeft, GripVertical, Save, Eye, Share2, Lock, Trash2, Copy } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -17,29 +17,80 @@ const tierRanks = [
 
 export default function Tierlist() {
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams(); 
   const [activeTab, setActiveTab] = useState<"library" | "creator" | "saved">("library");
   const [tierlistName, setTierlistName] = useState("");
   const [draggedGame, setDraggedGame] = useState<any>(null);
   
   // Estado da Tierlist Atual (Editor)
+  const [currentTierlistId, setCurrentTierlistId] = useState<number | null>(null); // ID da tierlist sendo editada
   const [tierGames, setTierGames] = useState<Record<string, any[]>>({
     S: [], A: [], B: [], C: [], D: [],
   });
   
   // Estados de Dados
-  const [userGames, setUserGames] = useState<any[]>([]); // Todos os jogos avaliados
-  const [poolGames, setPoolGames] = useState<any[]>([]); // Jogos disponíveis para arrastar
-  const [savedTierlists, setSavedTierlists] = useState<any[]>([]); // Lista das salvas
+  const [userGames, setUserGames] = useState<any[]>([]); 
+  const [poolGames, setPoolGames] = useState<any[]>([]); 
+  const [savedTierlists, setSavedTierlists] = useState<any[]>([]); 
+  
+  // Controle de visualização
+  const [viewingMode, setViewingMode] = useState(false);
+  const [viewingOwnerName, setViewingOwnerName] = useState("");
   
   const [loading, setLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
 
-  // 1. Carregar jogos avaliados pelo usuário (Biblioteca)
+  // 1. Carregar da URL (?load=ID)
+  useEffect(() => {
+    const loadId = searchParams.get("load");
+    if (loadId) {
+      fetchPublicTierlist(loadId);
+    }
+  }, [searchParams]);
+
+  const fetchPublicTierlist = async (id: string) => {
+    try {
+      const res = await fetch(`/api/tierlist_public/${id}`);
+      if (res.ok) {
+        const data = await res.json();
+        setTierlistName(data.name);
+        setTierGames(data.data);
+        
+        const myId = localStorage.getItem("userId");
+        const isMine = myId && parseInt(myId) === data.owner_id;
+        
+        setViewingOwnerName(data.owner_name);
+        setViewingMode(!isMine); 
+
+        if (isMine) {
+            setCurrentTierlistId(data.id); // Se é minha, salvo o ID para permitir edição (PUT)
+        } else {
+            setCurrentTierlistId(null); // Se não é minha, não tenho ID para editar
+        }
+        
+        // Recalcula o pool de jogos disponíveis (retira os que já estão na tierlist)
+        if (userGames.length > 0) {
+            const usedIds = new Set();
+            Object.values(data.data).forEach((list: any) => list.forEach((g: any) => usedIds.add(g.id)));
+            setPoolGames(userGames.filter(g => !usedIds.has(g.id)));
+        }
+
+        setActiveTab("creator"); 
+        toast.success(`Carregada: ${data.name}`);
+      } else {
+        toast.error("Tierlist não encontrada.");
+      }
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
+  // 2. Carregar jogos do usuário
   useEffect(() => {
     const fetchUserGames = async () => {
       const userId = localStorage.getItem("userId");
       if (!userId) {
-        navigate("/");
+        if (!searchParams.get("load")) navigate("/");
         return;
       }
       try {
@@ -47,8 +98,8 @@ export default function Tierlist() {
         if (response.ok) {
           const data = await response.json();
           setUserGames(data);
-          // Se o editor estiver vazio, enche o pool com todos os jogos
-          if (Object.values(tierGames).flat().length === 0) {
+          // Só enche o pool se não estiver carregando uma tierlist específica
+          if (!searchParams.get("load") && Object.values(tierGames).flat().length === 0) {
              setPoolGames(data);
           }
         }
@@ -58,30 +109,32 @@ export default function Tierlist() {
         setLoading(false);
       }
     };
-
     fetchUserGames();
   }, [navigate]);
 
-  // 2. Carregar tierlists salvas quando entra na aba "saved"
+  // 3. Carregar Salvas
+  const fetchSavedTierlists = async () => {
+    const userId = localStorage.getItem("userId");
+    if (!userId) return;
+    try {
+      const response = await fetch(`/api/tierlists/${userId}`);
+      if (response.ok) {
+        setSavedTierlists(await response.json());
+      }
+    } catch (error) {
+      toast.error("Erro ao carregar tierlists salvas.");
+    }
+  };
+
   useEffect(() => {
     if (activeTab === "saved") {
-      const fetchSaved = async () => {
-        const userId = localStorage.getItem("userId");
-        try {
-          const response = await fetch(`/api/tierlists/${userId}`);
-          if (response.ok) {
-            setSavedTierlists(await response.json());
-          }
-        } catch (error) {
-          toast.error("Erro ao carregar tierlists salvas.");
-        }
-      };
-      fetchSaved();
+      fetchSavedTierlists();
     }
   }, [activeTab]);
 
-  // --- LÓGICA DE ARRASTAR E SOLTAR (DRAG AND DROP) ---
+  // --- DRAG AND DROP ---
   const handleDragStart = (game: any) => {
+    if (viewingMode) return;
     setDraggedGame(game);
   };
 
@@ -90,40 +143,37 @@ export default function Tierlist() {
   };
 
   const handleDropOnTier = (tier: string) => {
-    if (!draggedGame) return;
+    if (!draggedGame || viewingMode) return;
 
-    // Remove de onde estava (outra tier ou pool)
     const newTierGames = { ...tierGames };
     Object.keys(newTierGames).forEach((key) => {
       newTierGames[key] = newTierGames[key].filter((g: any) => g.id !== draggedGame.id);
     });
     setPoolGames(poolGames.filter((g) => g.id !== draggedGame.id));
-
-    // Adiciona no novo destino
     newTierGames[tier] = [...newTierGames[tier], draggedGame];
     setTierGames(newTierGames);
     setDraggedGame(null);
   };
 
   const handleDropOnPool = () => {
-    if (!draggedGame) return;
-
-    // Remove de qualquer tier
+    if (!draggedGame || viewingMode) return;
     const newTierGames = { ...tierGames };
     Object.keys(newTierGames).forEach((key) => {
       newTierGames[key] = newTierGames[key].filter((g: any) => g.id !== draggedGame.id);
     });
     setTierGames(newTierGames);
-
-    // Devolve pro pool se não estiver lá
     if (!poolGames.find((g) => g.id === draggedGame.id)) {
       setPoolGames([...poolGames, draggedGame]);
     }
     setDraggedGame(null);
   };
-  // ---------------------------------------------------
 
-  const handleSaveTierlist = async () => {
+  // --- SALVAR / EDITAR ---
+  const handleSaveTierlist = async (saveAsNew: boolean = false) => {
+    if (viewingMode && !saveAsNew) {
+      toast.info("Você não pode editar a tierlist de outra pessoa. Use 'Salvar como Cópia'.");
+      return;
+    }
     if (!tierlistName.trim()) {
       toast.error("Dê um nome para sua Tierlist!");
       return;
@@ -133,8 +183,15 @@ export default function Tierlist() {
 
     setIsSaving(true);
     try {
-      const response = await fetch("/api/tierlist", {
-        method: "POST",
+      // Decide se é PUT (Atualizar) ou POST (Criar)
+      const method = (currentTierlistId && !saveAsNew) ? "PUT" : "POST";
+      // Se for PUT, usa a rota com ID. Se for POST, usa a rota base.
+      const url = (currentTierlistId && !saveAsNew) 
+        ? `/api/tierlist/${currentTierlistId}` 
+        : "/api/tierlist";
+
+      const response = await fetch(url, {
+        method: method,
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           name: tierlistName,
@@ -144,8 +201,9 @@ export default function Tierlist() {
       });
 
       if (response.ok) {
-        toast.success("Tierlist salva com sucesso!");
-        setActiveTab("saved"); // Vai para a aba de salvos
+        toast.success(saveAsNew ? "Cópia salva com sucesso!" : "Tierlist atualizada!");
+        setActiveTab("saved"); 
+        handleNewTierlist(); // Limpa o editor após salvar
       } else {
         toast.error("Erro ao salvar.");
       }
@@ -156,18 +214,49 @@ export default function Tierlist() {
     }
   };
 
-  // Função mágica: Carrega uma tierlist salva para o editor
+  // --- EXCLUIR ---
+  const handleDeleteTierlist = async (id: number) => {
+    if (!confirm("Tem certeza que deseja excluir esta Tierlist?")) return;
+    
+    const userId = localStorage.getItem("userId");
+    try {
+        const res = await fetch(`/api/tierlist/${id}?owner_id=${userId}`, {
+            method: "DELETE"
+        });
+        if (res.ok) {
+            toast.success("Tierlist excluída.");
+            setSavedTierlists(prev => prev.filter(t => t.id !== id));
+        } else {
+            toast.error("Erro ao excluir.");
+        }
+    } catch(e) {
+        toast.error("Erro de conexão");
+    }
+  };
+
   const loadTierlistToView = (tierlist: any) => {
     setTierlistName(tierlist.name);
     setTierGames(tierlist.data);
+    setCurrentTierlistId(tierlist.id); // IMPORTANTE: Define o ID para edição
+    setViewingMode(false); 
+    setViewingOwnerName("");
     
-    // Calcula quais jogos NÃO estão na tierlist para colocar no pool
     const usedIds = new Set();
     Object.values(tierlist.data).forEach((list: any) => list.forEach((g: any) => usedIds.add(g.id)));
     setPoolGames(userGames.filter(g => !usedIds.has(g.id)));
     
     setActiveTab("creator");
-    toast.info(`Editando: ${tierlist.name}`);
+  };
+
+  const handleNewTierlist = () => {
+    setTierlistName("");
+    setTierGames({ S: [], A: [], B: [], C: [], D: [] });
+    setPoolGames(userGames);
+    setViewingMode(false);
+    setViewingOwnerName("");
+    setCurrentTierlistId(null); // Reseta o ID
+    setSearchParams({}); // Limpa a URL
+    setActiveTab("creator");
   };
 
   return (
@@ -199,13 +288,15 @@ export default function Tierlist() {
             <h1 className="text-4xl md:text-5xl font-black text-primary uppercase tracking-tight font-pixel mb-2">
               Tierlists
             </h1>
-            <p className="text-muted-foreground">Crie e gerencie seus rankings</p>
+            <p className="text-muted-foreground">Crie, compartilhe e visualize rankings</p>
           </div>
 
           <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as any)} className="w-full">
             <TabsList className="grid w-full max-w-2xl mx-auto grid-cols-3 glass-panel">
               <TabsTrigger value="library">Jogos Avaliados</TabsTrigger>
-              <TabsTrigger value="creator">Editor</TabsTrigger>
+              <TabsTrigger value="creator">
+                 {viewingMode ? "Visualizador" : (currentTierlistId ? "Editando" : "Criador")}
+              </TabsTrigger>
               <TabsTrigger value="saved">Minhas Tierlists</TabsTrigger>
             </TabsList>
 
@@ -217,71 +308,112 @@ export default function Tierlist() {
                 </h3>
                 <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-4">
                   {userGames.map((game) => (
-                    <div key={game.id} className="glass-panel rounded-lg overflow-hidden border border-primary/20 group">
+                    <div key={game.id} className="glass-panel rounded-lg overflow-hidden border border-primary/20 group relative">
+                       <div className="absolute top-1 right-1 bg-black/80 text-primary text-[10px] font-bold px-1.5 py-0.5 rounded z-10">
+                          {game.nota_geral ? game.nota_geral.toFixed(1) : ""}
+                       </div>
                       <img src={game.cover} alt={game.title} className="w-full aspect-[3/4] object-cover group-hover:scale-105 transition-transform" />
                       <div className="p-2 text-center">
                         <p className="text-xs font-bold truncate">{game.title}</p>
                       </div>
                     </div>
                   ))}
-                  {userGames.length === 0 && !loading && (
-                    <div className="col-span-full text-center py-12 text-gray-500">
-                      <p>Você ainda não avaliou nenhum jogo.</p>
-                      <Button variant="link" onClick={() => navigate("/home")} className="text-[#3bbe5d]">Ir avaliar agora</Button>
-                    </div>
-                  )}
                 </div>
               </div>
             </TabsContent>
 
-            {/* ABA 2: EDITOR (CRIAR TIERLIST) */}
+            {/* ABA 2: EDITOR / VISUALIZADOR */}
             <TabsContent value="creator" className="space-y-6 mt-6">
-              {/* Nome e Salvar */}
+              {/* Barra de Controle */}
               <div className="glass-panel rounded-xl border-2 border-primary/30 p-6">
-                <div className="flex items-center gap-4">
-                  <Input
-                    placeholder="Nome da Tierlist (ex: Meus RPGs Favoritos)"
-                    value={tierlistName}
-                    onChange={(e) => setTierlistName(e.target.value)}
-                    className="flex-1 bg-background/50 border-primary/20 focus:border-primary/50 font-medium text-white"
-                  />
-                  <Button 
-                    onClick={handleSaveTierlist} 
-                    disabled={isSaving}
-                    className="bg-primary hover:bg-primary/90 text-black font-pixel text-xs uppercase tracking-wider"
-                  >
-                    <Save className="h-4 w-4 mr-2" />
-                    {isSaving ? "Salvando..." : "Salvar"}
-                  </Button>
+                <div className="flex flex-col md:flex-row items-center gap-4">
+                   {viewingMode ? (
+                     <div className="flex-1 flex items-center gap-2 text-white">
+                        <Lock className="w-4 h-4 text-yellow-500" />
+                        <span className="text-gray-400">De:</span>
+                        <span className="font-bold text-primary text-lg">{viewingOwnerName}</span>
+                        <span className="mx-2 text-gray-600">|</span>
+                        <span className="font-bold italic">"{tierlistName}"</span>
+                     </div>
+                   ) : (
+                      <Input
+                        placeholder="Nome da Tierlist..."
+                        value={tierlistName}
+                        onChange={(e) => setTierlistName(e.target.value)}
+                        className="flex-1 bg-background/50 border-primary/20 font-medium text-white"
+                      />
+                   )}
+                  
+                  <div className="flex gap-2">
+                      {!viewingMode ? (
+                        <>
+                            {currentTierlistId && (
+                                <Button 
+                                    onClick={handleNewTierlist} 
+                                    variant="ghost"
+                                    className="text-gray-400 hover:text-white"
+                                >
+                                    Cancelar Edição
+                                </Button>
+                            )}
+                            <Button 
+                            onClick={() => handleSaveTierlist(false)} 
+                            disabled={isSaving}
+                            className="bg-primary hover:bg-primary/90 text-black font-pixel text-xs uppercase"
+                            >
+                            <Save className="h-4 w-4 mr-2" />
+                            {isSaving ? "Salvando..." : (currentTierlistId ? "Atualizar" : "Salvar")}
+                            </Button>
+                        </>
+                      ) : (
+                        <Button 
+                          onClick={handleNewTierlist} 
+                          variant="outline"
+                          className="border-primary text-primary hover:bg-primary/10"
+                        >
+                          Criar Nova (Limpar)
+                        </Button>
+                      )}
+
+                      {/* Botão de clonar ou salvar cópia */}
+                      {(viewingMode || currentTierlistId) && (
+                          <Button 
+                             onClick={() => handleSaveTierlist(true)}
+                             variant="secondary"
+                             className="text-xs"
+                             disabled={isSaving}
+                          >
+                             <Copy className="h-3 w-3 mr-2" /> Salvar Cópia
+                          </Button>
+                      )}
+                  </div>
                 </div>
               </div>
 
-              {/* Ranks (Área de Drop) */}
+              {/* Ranks */}
               <div className="glass-panel rounded-2xl border-2 border-primary/30 p-6 space-y-4">
                 {tierRanks.map((tier) => (
                   <div
                     key={tier.rank}
                     onDragOver={handleDragOver}
                     onDrop={() => handleDropOnTier(tier.rank)}
-                    className={`relative min-h-[120px] rounded-xl border-2 border-primary/20 overflow-hidden transition-all hover:border-primary/40 ${
-                      draggedGame ? 'bg-primary/5 border-dashed' : ''
+                    className={`relative min-h-[120px] rounded-xl border-2 border-primary/20 overflow-hidden transition-all ${
+                      draggedGame && !viewingMode ? 'bg-primary/5 border-dashed hover:border-primary/40' : ''
                     }`}
                   >
                     <div className={`absolute inset-0 bg-gradient-to-r ${tier.color} opacity-10`} />
                     <div className="relative flex gap-3 p-4">
                       <div className="flex-shrink-0 w-16 flex flex-col items-center justify-center bg-black/20 rounded-lg">
                         <span className="text-3xl font-black text-primary uppercase font-pixel">{tier.rank}</span>
-                        <span className="text-[9px] text-muted-foreground uppercase tracking-wider">{tier.label.split(' - ')[1]}</span>
                       </div>
                       <div className="flex-1 flex flex-wrap gap-3 items-center min-h-[80px]">
                         {tierGames[tier.rank].map((game: any) => (
                           <div
                             key={game.id}
-                            draggable
+                            draggable={!viewingMode}
                             onDragStart={() => handleDragStart(game)}
-                            className="relative w-16 group cursor-move hover:scale-110 transition-transform"
+                            className={`relative w-16 group ${!viewingMode ? 'cursor-move hover:scale-110' : ''} transition-transform`}
                           >
-                            <GripVertical className="absolute -top-1 -left-1 h-3 w-3 text-white opacity-0 group-hover:opacity-100 z-10 bg-black/50 rounded shadow-sm" />
                             <img src={game.cover} alt={game.title} className="w-full aspect-[3/4] object-cover rounded border border-white/20" />
                           </div>
                         ))}
@@ -291,66 +423,81 @@ export default function Tierlist() {
                 ))}
               </div>
 
-              {/* Pool de Jogos (Área de Origem) */}
-              <div
-                onDragOver={handleDragOver}
-                onDrop={handleDropOnPool}
-                className="glass-panel rounded-2xl border-2 border-primary/30 p-6"
-              >
-                <h3 className="text-lg font-black text-primary uppercase tracking-wider mb-4 font-pixel">
-                  Disponíveis ({poolGames.length})
-                </h3>
-                <div className="flex flex-wrap gap-3">
-                  {poolGames.map((game) => (
-                    <div
-                      key={game.id}
-                      draggable
-                      onDragStart={() => handleDragStart(game)}
-                      className="w-20 cursor-move hover:scale-105 transition-transform"
-                    >
-                      <img
-                        src={game.cover}
-                        alt={game.title}
-                        className="w-full aspect-[3/4] object-cover rounded border-2 border-primary/20 hover:border-primary/50 transition-all"
-                      />
-                    </div>
-                  ))}
-                  {poolGames.length === 0 && tierGames['S'].length === 0 && (
-                     <p className="text-sm text-gray-500 italic w-full text-center py-4">
-                       Seus jogos avaliados aparecerão aqui.
-                     </p>
-                  )}
+              {/* Pool de Jogos */}
+              {!viewingMode && (
+                <div
+                  onDragOver={handleDragOver}
+                  onDrop={handleDropOnPool}
+                  className="glass-panel rounded-2xl border-2 border-primary/30 p-6"
+                >
+                  <h3 className="text-lg font-black text-primary uppercase tracking-wider mb-4 font-pixel">
+                    Disponíveis ({poolGames.length})
+                  </h3>
+                  <div className="flex flex-wrap gap-3">
+                    {poolGames.map((game) => (
+                      <div
+                        key={game.id}
+                        draggable
+                        onDragStart={() => handleDragStart(game)}
+                        className="w-20 cursor-move hover:scale-105 transition-transform"
+                      >
+                        <img
+                          src={game.cover}
+                          alt={game.title}
+                          className="w-full aspect-[3/4] object-cover rounded border-2 border-primary/20"
+                        />
+                      </div>
+                    ))}
+                  </div>
                 </div>
-              </div>
+              )}
             </TabsContent>
 
-            {/* ABA 3: MINHAS TIERLISTS (SALVAS) */}
+            {/* ABA 3: MINHAS TIERLISTS */}
             <TabsContent value="saved" className="space-y-6 mt-6">
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                 {savedTierlists.map((tierlist) => (
-                  <div 
-                    key={tierlist.id} 
-                    className="glass-panel rounded-xl border-2 border-primary/20 p-6 flex flex-col justify-between group hover:border-primary/50 transition-all"
-                  >
+                  <div key={tierlist.id} className="glass-panel rounded-xl border-2 border-primary/20 p-6 flex flex-col justify-between group hover:border-primary/50 transition-all">
                     <div>
-                      <h3 
-                        onClick={() => loadTierlistToView(tierlist)}
-                        className="text-xl font-bold text-white font-pixel mb-2 truncate cursor-pointer hover:text-[#3bbe5d] transition-colors"
-                      >
-                        {tierlist.name}
-                      </h3>
-                      <p className="text-xs text-gray-400 mb-4">
-                        {Object.values(tierlist.data).flat().length} jogos rankeados
-                      </p>
-                      
-                      {/* Preview Miniatura dos Ranks */}
-                      <div className="flex gap-1 mb-4 h-2 rounded-full overflow-hidden bg-black/40 w-full">
-                        {tierRanks.map(t => {
-                           const count = tierlist.data[t.rank]?.length || 0;
-                           if (count === 0) return null;
-                           return <div key={t.rank} className={`${t.barColor} h-full`} style={{ flex: count }} title={`${t.rank}: ${count}`} />
-                        })}
-                      </div>
+                        <div className="flex justify-between items-start mb-2">
+                            <h3 
+                                onClick={() => loadTierlistToView(tierlist)}
+                                className="text-xl font-bold text-white font-pixel mb-2 truncate cursor-pointer hover:text-[#3bbe5d] transition-colors flex-1"
+                            >
+                                {tierlist.name}
+                            </h3>
+                            <div className="flex gap-1">
+                                <button 
+                                    onClick={() => {
+                                    navigator.clipboard.writeText(`${window.location.origin}/tierlist?load=${tierlist.id}`);
+                                    toast.success("Link copiado!");
+                                    }}
+                                    className="text-gray-400 hover:text-primary p-1.5 rounded hover:bg-white/5"
+                                    title="Compartilhar"
+                                >
+                                    <Share2 className="w-4 h-4" />
+                                </button>
+                                <button 
+                                    onClick={() => handleDeleteTierlist(tierlist.id)}
+                                    className="text-gray-400 hover:text-red-500 p-1.5 rounded hover:bg-red-500/10"
+                                    title="Excluir"
+                                >
+                                    <Trash2 className="w-4 h-4" />
+                                </button>
+                            </div>
+                        </div>
+                        
+                        <div className="flex gap-1 mb-4 h-2 rounded-full overflow-hidden bg-black/40 w-full">
+                            {tierRanks.map(t => {
+                                const count = tierlist.data[t.rank]?.length || 0;
+                                if (count === 0) return null;
+                                return <div key={t.rank} className={`${t.barColor} h-full`} style={{ flex: count }} />
+                            })}
+                        </div>
+                        
+                        <p className="text-xs text-gray-400 mb-4">
+                            {Object.values(tierlist.data).flat().length} jogos rankeados
+                        </p>
                     </div>
                     
                     <Button 
@@ -358,23 +505,17 @@ export default function Tierlist() {
                       className="w-full border-primary text-primary hover:bg-primary/10"
                       onClick={() => loadTierlistToView(tierlist)}
                     >
-                      <Eye className="w-4 h-4 mr-2" /> Abrir / Editar
+                      <Eye className="w-4 h-4 mr-2" /> Editar
                     </Button>
                   </div>
                 ))}
                 {savedTierlists.length === 0 && (
-                  <div className="col-span-full text-center py-12">
-                    <div className="bg-black/40 rounded-xl p-8 border border-white/5 inline-block">
-                        <p className="text-gray-500 mb-4">Você ainda não salvou nenhuma Tierlist.</p>
-                        <Button variant="link" onClick={() => setActiveTab("creator")} className="text-[#3bbe5d]">
-                            Criar minha primeira Tierlist
-                        </Button>
+                    <div className="col-span-full text-center py-12 text-gray-500">
+                        <p>Nenhuma tierlist salva.</p>
                     </div>
-                  </div>
                 )}
               </div>
             </TabsContent>
-
           </Tabs>
         </div>
       </div>
