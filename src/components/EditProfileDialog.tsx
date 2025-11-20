@@ -3,16 +3,18 @@ import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { User, Upload, Link as LinkIcon } from "lucide-react";
+import { Upload, Link as LinkIcon } from "lucide-react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 import { toast } from "sonner";
 
-// --- IMPORTANDO OS NOVOS ASSETS LOCAIS ---
+// --- IMPORTANDO OS BANNERS (Certifique-se que BANNER5 e BANNER6 existem na pasta assets) ---
 import banner1 from "@/assets/BANNER1.png";
 import banner2 from "@/assets/BANNER2.png";
 import banner3 from "@/assets/BANNER3.png";
 import banner4 from "@/assets/BANNER4.png";
+import banner5 from "@/assets/BANNER5.png"; // Novo
+import banner6 from "@/assets/BANNER6.png"; // Novo
 import defaultProfileImg from "@/assets/defaultprofile.png";
 
 interface EditProfileDialogProps {
@@ -25,8 +27,8 @@ interface EditProfileDialogProps {
   onProfileUpdate: () => void;
 }
 
-// Agora usamos as imagens importadas
-const presetBanners = [banner1, banner2, banner3, banner4];
+// Adicionamos os novos banners na lista
+const presetBanners = [banner1, banner2, banner3, banner4, banner5, banner6];
 
 export const EditProfileDialog = ({ open, onOpenChange, currentBio, currentUsername, currentNickname, currentSocial, onProfileUpdate }: EditProfileDialogProps) => {
   const [bio, setBio] = useState(currentBio || "");
@@ -223,7 +225,8 @@ export const EditProfileDialog = ({ open, onOpenChange, currentBio, currentUsern
                     selectedBanner === banner ? 'border-primary shadow-lg shadow-primary/20' : 'border-transparent hover:border-gray-600'
                   }`}
                 >
-                  <img src={banner} className="w-full h-20 object-cover" />
+                  {/* ALTERADO: Adicionei brightness-75 para escurecer um pouco */}
+                  <img src={banner} className="w-full h-20 object-cover brightness-75 hover:brightness-100 transition-all" />
                 </div>
               ))}
             </div>
