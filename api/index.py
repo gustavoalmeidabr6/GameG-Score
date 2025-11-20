@@ -132,6 +132,11 @@ class TierlistInput(BaseModel):
     data: Dict[str, Any]
     owner_id: int
 
+class TierlistUpdate(BaseModel):
+    name: str
+    data: Dict[str, Any]
+    owner_id: int
+
 @app.get("/api/DANGEROUS-RESET-DB")
 def dangerous_reset_db(db: Session = Depends(get_db)):
     try:
@@ -333,15 +338,45 @@ def get_statistics(user_id: int, db: Session = Depends(get_db)):
     return { "top_by_genre": top_by_genre, "best_by_attribute": best_by_attribute }
 
 @app.get("/api/user_games/{user_id}")
+@app.get("/api/user_games/{user_id}")
+@app.get("/api/user_games/{user_id}")
 def get_user_games(user_id: int, db: Session = Depends(get_db)):
     reviews = db.query(Review).filter(Review.owner_id == user_id).all()
     games = []
     seen_ids = set()
     for r in reviews:
         if r.game_id not in seen_ids:
-            games.append({"id": r.game_id, "title": r.game_name, "cover": r.game_image_url or ""})
+            # AQUI ESTÁ A CORREÇÃO: Adicionamos "nota_geral": r.nota_geral
+            games.append({
+                "id": r.game_id, 
+                "title": r.game_name, 
+                "cover": r.game_image_url or "",
+                "nota_geral": r.nota_geral 
+            })
             seen_ids.add(r.game_id)
     return games
+    
+@app.get("/api/tierlist_public/{tierlist_id}")
+def get_single_tierlist(tierlist_id: int, db: Session = Depends(get_db)):
+    tierlist = db.query(Tierlist).filter(Tierlist.id == tierlist_id).first()
+    if not tierlist:
+        raise HTTPException(status_code=404, detail="Tierlist não encontrada")
+    
+    try:
+        loaded_data = json.loads(tierlist.data) if tierlist.data else {}
+    except: loaded_data = {}
+
+    # Buscamos o dono para mostrar o nome dele na tela
+    owner = db.query(User).filter(User.id == tierlist.owner_id).first()
+    owner_name = owner.username if owner else "Desconhecido"
+
+    return { 
+        "id": tierlist.id, 
+        "name": tierlist.name, 
+        "data": loaded_data, 
+        "owner_id": tierlist.owner_id,
+        "owner_name": owner_name
+    }
 
 @app.post("/api/tierlist")
 def create_tierlist(tierlist_input: TierlistInput, db: Session = Depends(get_db)):
@@ -365,6 +400,48 @@ def get_tierlists(user_id: int, db: Session = Depends(get_db)):
             result.append({ "id": t.id, "name": t.name, "data": loaded_data })
         except: pass
     return result
+
+# --- ROTAS DE TIERLIST ADICIONADAS ---
+
+@app.delete("/api/tierlist/{tierlist_id}")
+def delete_tierlist(tierlist_id: int, owner_id: int, db: Session = Depends(get_db)):
+    # Verifica se a tierlist existe e se pertence ao usuario
+    tierlist = db.query(Tierlist).filter(Tierlist.id == tierlist_id).first()
+    if not tierlist:
+        raise HTTPException(status_code=404, detail="Tierlist não encontrada")
+    
+    # Nota: Em um cenário real, você pegaria o owner_id do token de autenticação.
+    # Como estamos passando via query param ou body por simplicidade neste projeto:
+    if tierlist.owner_id != owner_id:
+        raise HTTPException(status_code=403, detail="Sem permissão para deletar")
+
+    try:
+        db.delete(tierlist)
+        db.commit()
+        return {"message": "Tierlist deletada com sucesso!"}
+    except Exception as e:
+        db.rollback()
+        return {"error": str(e)}
+
+@app.put("/api/tierlist/{tierlist_id}")
+def update_tierlist(tierlist_id: int, tierlist_input: TierlistUpdate, db: Session = Depends(get_db)):
+    tierlist = db.query(Tierlist).filter(Tierlist.id == tierlist_id).first()
+    if not tierlist:
+        raise HTTPException(status_code=404, detail="Tierlist não encontrada")
+        
+    if tierlist.owner_id != tierlist_input.owner_id:
+        raise HTTPException(status_code=403, detail="Sem permissão para editar")
+
+    try:
+        tierlist.name = tierlist_input.name
+        tierlist.data = json.dumps(tierlist_input.data)
+        db.commit()
+        return {"message": "Tierlist atualizada com sucesso!"}
+    except Exception as e:
+        db.rollback()
+        return {"error": str(e)}
+        
+# -------------------------------------
 
 @app.post("/api/review")
 def post_review(review_input: ReviewInput, db: Session = Depends(get_db)):
