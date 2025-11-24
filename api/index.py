@@ -6,6 +6,7 @@ import time
 import json
 from pydantic import BaseModel, Json
 from typing import Optional, List, Dict, Any
+from datetime import datetime
 
 from dotenv import load_dotenv
 load_dotenv()
@@ -27,12 +28,14 @@ def get_password_hash(password):
     hashed = bcrypt.hashpw(pwd_bytes, salt)
     return hashed.decode('utf-8')
 
-from sqlalchemy import create_engine, Column, Integer, String, Float, ForeignKey, desc, Boolean, Text, or_, and_
+from sqlalchemy import create_engine, Column, Integer, String, Float, ForeignKey, desc, Boolean, Text, or_, and_, func
 from sqlalchemy.orm import sessionmaker, declarative_base, Session
 
 engine = None
 SessionLocal = None
 Base = declarative_base()
+
+# --- MODELOS DO BANCO DE DADOS ---
 
 class User(Base):
     __tablename__ = "users"
@@ -73,6 +76,23 @@ class Tierlist(Base):
     data = Column(Text)
     owner_id = Column(Integer, ForeignKey("users.id"))
 
+# --- NOVAS TABELAS PARA COMENTÁRIOS ---
+class Comment(Base):
+    __tablename__ = "comments"
+    id = Column(Integer, primary_key=True, index=True)
+    game_id = Column(Integer, nullable=False, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"))
+    content = Column(Text, nullable=False)
+    created_at = Column(String, default=lambda: datetime.now().isoformat())
+
+class CommentLike(Base):
+    __tablename__ = "comment_likes"
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"))
+    comment_id = Column(Integer, ForeignKey("comments.id"))
+
+# ---------------------------------------
+
 def get_db():
     global engine, SessionLocal
     try:
@@ -84,6 +104,11 @@ def get_db():
                 DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql://", 1)
             engine = create_engine(DATABASE_URL)
             SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+            
+            # Tenta criar apenas as tabelas novas se elas não existirem
+            # Isso é seguro e não apaga dados antigos
+            Base.metadata.create_all(bind=engine)
+            
         db = SessionLocal()
         yield db
     finally:
@@ -94,6 +119,7 @@ app.add_middleware(
     CORSMiddleware, allow_origins=["*"], allow_credentials=True, allow_methods=["*"], allow_headers=["*"], 
 )
 
+# --- SCHEMAS (Pydantic) ---
 class UserCreate(BaseModel):
     username: str
     email: str
@@ -137,6 +163,17 @@ class TierlistUpdate(BaseModel):
     data: Dict[str, Any]
     owner_id: int
 
+class CommentInput(BaseModel):
+    game_id: int
+    user_id: int
+    content: str
+
+class LikeInput(BaseModel):
+    user_id: int
+    comment_id: int
+
+# --- ROTAS GERAIS ---
+
 @app.get("/api/DANGEROUS-RESET-DB")
 def dangerous_reset_db(db: Session = Depends(get_db)):
     try:
@@ -174,11 +211,15 @@ def get_profile(user_id: int, db: Session = Depends(get_db)):
     user = db.query(User).filter(User.id == user_id).first()
     if not user: raise HTTPException(status_code=404, detail="Usuário não encontrado")
     
+    # Busca TODAS as reviews para calcular estatísticas completas
     all_reviews = db.query(Review).filter(Review.owner_id == user_id).all()
     review_count = len(all_reviews)
     
     genre_map = {}
     fps_count = 0
+    
+    total_score_sum = 0
+
     for r in all_reviews:
         g_name = r.genre or "Outros"
         if "Shooter" in g_name or "FPS" in g_name:
@@ -187,6 +228,8 @@ def get_profile(user_id: int, db: Session = Depends(get_db)):
             genre_map[g_name] = {"count": 0, "total_score": 0.0}
         genre_map[g_name]["count"] += 1
         genre_map[g_name]["total_score"] += r.nota_geral
+        
+        total_score_sum += r.nota_geral
 
     favorite_genre = "Nenhum"
     if genre_map:
@@ -194,8 +237,12 @@ def get_profile(user_id: int, db: Session = Depends(get_db)):
             data = item[1]
             avg = data["total_score"] / data["count"] if data["count"] > 0 else 0
             return (data["count"], avg)
+        # Ordena para achar o gênero com mais reviews/melhor média
         sorted_genres = sorted(genre_map.items(), key=get_sort_key, reverse=True)
         favorite_genre = sorted_genres[0][0]
+
+    # Cálculo da Média Geral Real (Baseada em TODOS os jogos)
+    global_average = total_score_sum / review_count if review_count > 0 else 0.0
 
     attributes = ["jogabilidade", "graficos", "narrativa", "audio", "desempenho"]
     best_by_attribute = {}
@@ -231,6 +278,7 @@ def get_profile(user_id: int, db: Session = Depends(get_db)):
         "veteran": user.level >= 5
     }
 
+    # Pega apenas os top 3 para exibir nos destaques, mas a média geral já foi calculada com todos
     top_reviews = sorted(all_reviews, key=lambda x: x.nota_geral, reverse=True)[:3]
     top_reviews_data = []
     for r in top_reviews:
@@ -255,7 +303,8 @@ def get_profile(user_id: int, db: Session = Depends(get_db)):
         "level": user.level,
         "stats": { 
             "reviews_count": review_count,
-            "favorite_genre": favorite_genre
+            "favorite_genre": favorite_genre,
+            "average_score": global_average # Nova propriedade com a média de TODOS os jogos
         },
         "social": { "steam": user.steam_url, "xbox": user.xbox_url, "psn": user.psn_url, "epic": user.epic_url },
         "best_by_attribute": best_by_attribute,
@@ -275,10 +324,8 @@ def search_users(q: str, db: Session = Depends(get_db)):
         })
     return results
 
-# --- NOVA ROTA: RANKING GLOBAL ---
 @app.get("/api/users/top")
 def get_top_users(db: Session = Depends(get_db)):
-    # Pega os 10 usuários com mais XP
     users = db.query(User).order_by(desc(User.xp)).limit(10).all()
     results = []
     for u in users:
@@ -338,15 +385,12 @@ def get_statistics(user_id: int, db: Session = Depends(get_db)):
     return { "top_by_genre": top_by_genre, "best_by_attribute": best_by_attribute }
 
 @app.get("/api/user_games/{user_id}")
-@app.get("/api/user_games/{user_id}")
-@app.get("/api/user_games/{user_id}")
 def get_user_games(user_id: int, db: Session = Depends(get_db)):
     reviews = db.query(Review).filter(Review.owner_id == user_id).all()
     games = []
     seen_ids = set()
     for r in reviews:
         if r.game_id not in seen_ids:
-            # AQUI ESTÁ A CORREÇÃO: Adicionamos "nota_geral": r.nota_geral
             games.append({
                 "id": r.game_id, 
                 "title": r.game_name, 
@@ -356,6 +400,34 @@ def get_user_games(user_id: int, db: Session = Depends(get_db)):
             seen_ids.add(r.game_id)
     return games
     
+@app.get("/api/games/best-rated")
+def get_best_rated_games(db: Session = Depends(get_db)):
+    results = db.query(
+        Review.game_id,
+        Review.game_name,
+        Review.game_image_url,
+        func.avg(Review.nota_geral).label("average_score"),
+        func.count(Review.id).label("review_count")
+    ).group_by(
+        Review.game_id, Review.game_name, Review.game_image_url
+    )\
+    .having(func.count(Review.id) >= 2) \
+    .order_by(
+        desc("average_score"), 
+        desc("review_count")
+    ).limit(12).all()
+
+    games = []
+    for r in results:
+        games.append({
+            "id": r.game_id,
+            "name": r.game_name,
+            "image": { "medium_url": r.game_image_url, "thumb_url": r.game_image_url },
+            "average_score": r.average_score,
+            "review_count": r.review_count
+        })
+    return games
+
 @app.get("/api/tierlist_public/{tierlist_id}")
 def get_single_tierlist(tierlist_id: int, db: Session = Depends(get_db)):
     tierlist = db.query(Tierlist).filter(Tierlist.id == tierlist_id).first()
@@ -366,7 +438,6 @@ def get_single_tierlist(tierlist_id: int, db: Session = Depends(get_db)):
         loaded_data = json.loads(tierlist.data) if tierlist.data else {}
     except: loaded_data = {}
 
-    # Buscamos o dono para mostrar o nome dele na tela
     owner = db.query(User).filter(User.id == tierlist.owner_id).first()
     owner_name = owner.username if owner else "Desconhecido"
 
@@ -395,23 +466,17 @@ def get_tierlists(user_id: int, db: Session = Depends(get_db)):
     result = []
     for t in tierlists:
         try:
-            # Garante que se data for None ou vazio, não quebre
             loaded_data = json.loads(t.data) if t.data else {}
             result.append({ "id": t.id, "name": t.name, "data": loaded_data })
         except: pass
     return result
 
-# --- ROTAS DE TIERLIST ADICIONADAS ---
-
 @app.delete("/api/tierlist/{tierlist_id}")
 def delete_tierlist(tierlist_id: int, owner_id: int, db: Session = Depends(get_db)):
-    # Verifica se a tierlist existe e se pertence ao usuario
     tierlist = db.query(Tierlist).filter(Tierlist.id == tierlist_id).first()
     if not tierlist:
         raise HTTPException(status_code=404, detail="Tierlist não encontrada")
     
-    # Nota: Em um cenário real, você pegaria o owner_id do token de autenticação.
-    # Como estamos passando via query param ou body por simplicidade neste projeto:
     if tierlist.owner_id != owner_id:
         raise HTTPException(status_code=403, detail="Sem permissão para deletar")
 
@@ -441,8 +506,6 @@ def update_tierlist(tierlist_id: int, tierlist_input: TierlistUpdate, db: Sessio
         db.rollback()
         return {"error": str(e)}
         
-# -------------------------------------
-
 @app.post("/api/review")
 def post_review(review_input: ReviewInput, db: Session = Depends(get_db)):
     try:
@@ -525,3 +588,163 @@ def get_game(game_id: str, api_key: str = Depends(get_api_key)):
 def get_review(game_id: int, owner_id: int, db: Session = Depends(get_db)):
     r = db.query(Review).filter(Review.game_id == game_id, Review.owner_id == owner_id).first()
     return r if r else {"error": "Não encontrada"}
+
+# --- ROTAS DE COMENTÁRIOS ---
+
+@app.post("/api/comments")
+def post_comment(comment: CommentInput, db: Session = Depends(get_db)):
+    try:
+        new_comment = Comment(
+            game_id=comment.game_id,
+            user_id=comment.user_id,
+            content=comment.content
+        )
+        db.add(new_comment)
+        db.commit()
+        return {"message": "Comentário enviado!"}
+    except Exception as e:
+        db.rollback()
+        return {"error": str(e)}
+
+@app.get("/api/game/{game_id}/discussion")
+def get_game_discussion(game_id: int, user_id: int = -1, db: Session = Depends(get_db)):
+    # Retorna contagem e o TOP comentário
+    total_count = db.query(Comment).filter(Comment.game_id == game_id).count()
+    
+    # Busca o comentário com mais likes (subquery para contar likes)
+    stmt = db.query(Comment, func.count(CommentLike.id).label('likes'))\
+        .outerjoin(CommentLike)\
+        .filter(Comment.game_id == game_id)\
+        .group_by(Comment.id)\
+        .order_by(desc('likes'), desc(Comment.created_at))\
+        .first()
+        
+    if not stmt:
+        return {"total": 0, "top_comment": None}
+        
+    comment, likes_count = stmt
+    
+    # Verifica se o usuário atual deu like
+    user_liked = False
+    if user_id != -1:
+        if db.query(CommentLike).filter(CommentLike.user_id == user_id, CommentLike.comment_id == comment.id).first():
+            user_liked = True
+            
+    # Pega info do autor
+    author = db.query(User).filter(User.id == comment.user_id).first()
+    
+    return {
+        "total": total_count,
+        "top_comment": {
+            "id": comment.id,
+            "content": comment.content,
+            "created_at": comment.created_at,
+            "likes": likes_count,
+            "user_liked": user_liked,
+            "author": {
+                "id": author.id,
+                "username": author.username,
+                "nickname": author.nickname or author.username,
+                "avatar_url": author.avatar_url
+            }
+        }
+    }
+
+@app.get("/api/game/{game_id}/comments/all")
+def get_all_game_comments(game_id: int, user_id: int = -1, db: Session = Depends(get_db)):
+    comments = db.query(Comment, func.count(CommentLike.id).label('likes'))\
+        .outerjoin(CommentLike)\
+        .filter(Comment.game_id == game_id)\
+        .group_by(Comment.id)\
+        .order_by(desc('likes'), desc(Comment.created_at))\
+        .all()
+        
+    result = []
+    for c, likes in comments:
+        user_liked = False
+        if user_id != -1:
+            if db.query(CommentLike).filter(CommentLike.user_id == user_id, CommentLike.comment_id == c.id).first():
+                user_liked = True
+        
+        author = db.query(User).filter(User.id == c.user_id).first()
+        
+        result.append({
+            "id": c.id,
+            "content": c.content,
+            "created_at": c.created_at,
+            "likes": likes,
+            "user_liked": user_liked,
+            "author": {
+                "id": author.id,
+                "username": author.username,
+                "nickname": author.nickname or author.username,
+                "avatar_url": author.avatar_url
+            }
+        })
+    return result
+
+@app.post("/api/comments/{comment_id}/like")
+def toggle_like(comment_id: int, like_data: LikeInput, db: Session = Depends(get_db)):
+    existing = db.query(CommentLike).filter(CommentLike.comment_id == comment_id, CommentLike.user_id == like_data.user_id).first()
+    if existing:
+        db.delete(existing)
+        db.commit()
+        return {"status": "unliked"}
+    else:
+        new_like = CommentLike(comment_id=comment_id, user_id=like_data.user_id)
+        db.add(new_like)
+        db.commit()
+        return {"status": "liked"}
+
+# --- ROTA NOVA PARA COMENTÁRIOS DO USUÁRIO ---
+@app.get("/api/user/{user_id}/comments")
+def get_user_comments(user_id: int, db: Session = Depends(get_db)):
+    # Busca comentários do usuário + contagem de likes
+    comments = db.query(Comment, func.count(CommentLike.id).label('likes'))\
+        .outerjoin(CommentLike)\
+        .filter(Comment.user_id == user_id)\
+        .group_by(Comment.id)\
+        .order_by(desc(Comment.created_at))\
+        .all()
+
+    results = []
+    for c, likes in comments:
+        # Tenta descobrir o nome do jogo
+        review = db.query(Review).filter(Review.game_id == c.game_id).first()
+        game_name = review.game_name if review else f"Jogo #{c.game_id}"
+        
+        results.append({
+            "id": c.id,
+            "content": c.content,
+            "likes": likes,
+            "game_name": game_name,
+            "game_id": c.game_id,
+            "created_at": c.created_at
+        })
+    return results
+
+@app.get("/api/user/{user_id}/best_comment")
+def get_user_best_comment(user_id: int, db: Session = Depends(get_db)):
+    # Pega o comentário mais curtido do usuário
+    stmt = db.query(Comment, func.count(CommentLike.id).label('likes'))\
+        .outerjoin(CommentLike)\
+        .filter(Comment.user_id == user_id)\
+        .group_by(Comment.id)\
+        .order_by(desc('likes'))\
+        .first()
+        
+    if not stmt: return None
+    
+    comment, likes = stmt
+    
+    game_name = "Jogo Desconhecido"
+    review = db.query(Review).filter(Review.game_id == comment.game_id).first()
+    if review: game_name = review.game_name
+    
+    return {
+        "id": comment.id,
+        "content": comment.content,
+        "likes": likes,
+        "game_name": game_name,
+        "game_id": comment.game_id
+    }
