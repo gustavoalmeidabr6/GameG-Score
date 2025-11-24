@@ -3,7 +3,7 @@ import { NavigationMenu } from "@/components/NavigationMenu";
 import welcomeBg from "@/assets/welcome-bg.jpg";
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Search } from "lucide-react";
+import { Search, Star } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { toast } from "sonner";
 
@@ -14,18 +14,8 @@ type GameSearchResult = {
     thumb_url: string | null;
     medium_url: string | null; 
   };
+  average_score?: number; // Adicionamos a nota opcional aqui
 };
-
-const RELEVANT_GAMES = [
-  "Elden Ring",
-  "Red Dead Redemption 2",
-  "The Legend of Zelda: Breath of the Wild",
-  "Minecraft",
-  "The Last of Us Part II",
-  "Sekiro: Shadows Die Twice",
-  "Grand Theft Auto V",
-  "Hollow Knight: Silksong"
-];
 
 const Index = () => {
   const [query, setQuery] = useState("");
@@ -59,40 +49,21 @@ const Index = () => {
     };
 
     fetchUserData();
-    loadRelevantGames();
+    loadBestRatedGames(); // Mudamos o nome da função aqui
   }, []);
 
-  const loadRelevantGames = async () => {
-    const cachedGames = localStorage.getItem("cached_popular_games");
-    if (cachedGames) {
-      setGames(JSON.parse(cachedGames));
-      setLoading(false);
-      return; 
-    }
-
+  // --- NOVA FUNÇÃO DE BUSCA ---
+  const loadBestRatedGames = async () => {
     setLoading(true);
     setIsSearching(false);
-    const loadedGames: GameSearchResult[] = [];
 
     try {
-      for (const gameName of RELEVANT_GAMES) {
-        try {
-          const response = await fetch(`/api/search?q=${encodeURIComponent(gameName)}`);
-          const data = await response.json();
-          if (Array.isArray(data) && data.length > 0) {
-            loadedGames.push(data[0]);
-            setGames([...loadedGames]); 
-          }
-          await new Promise(resolve => setTimeout(resolve, 1000));
-        } catch (err) {
-          console.error(`Erro ao carregar ${gameName}`, err);
-        }
+      // Chama a nova rota que criamos no Python
+      const response = await fetch("/api/games/best-rated");
+      if (response.ok) {
+        const data = await response.json();
+        setGames(data);
       }
-
-      if (loadedGames.length > 0) {
-        localStorage.setItem("cached_popular_games", JSON.stringify(loadedGames));
-      }
-
     } catch (error) {
       console.error("Erro geral ao carregar jogos:", error);
       toast.error("Erro ao carregar lista de jogos.");
@@ -123,7 +94,7 @@ const Index = () => {
     e.preventDefault();
     if (query.trim() === "") {
       setGames([]); 
-      loadRelevantGames();
+      loadBestRatedGames(); // Volta para os melhores avaliados se limpar a busca
     } else {
       searchGames(query);
     }
@@ -155,7 +126,6 @@ const Index = () => {
             level={userProfile?.level || 1}
             rank={userProfile ? `XP: ${userProfile.xp}` : "INICIANTE"}
             xp={userProfile?.xp || 0}
-            // CORREÇÃO AQUI: Removemos o link do Unsplash. Se for vazio, o componente usa o defaultprofile.png
             avatarUrl={userProfile?.avatar_url || ""} 
             bannerUrl={userProfile?.banner_url}
           />
@@ -182,7 +152,7 @@ const Index = () => {
             <div className="space-y-6">
               <div className="relative inline-block">
                 <h2 className="text-3xl md:text-4xl font-black text-primary uppercase tracking-widest neon-text font-pixel">
-                  {loading ? "CARREGANDO..." : (isSearching ? "RESULTADOS DA BUSCA" : "JOGOS POPULARES")}
+                  {loading ? "CARREGANDO..." : (isSearching ? "RESULTADOS DA BUSCA" : "MAIS BEM AVALIADOS")}
                 </h2>
                 <div className="absolute -bottom-2 left-0 right-0 h-1 bg-gradient-to-r from-primary via-gaming-glow to-primary neon-glow" />
               </div>
@@ -206,6 +176,15 @@ const Index = () => {
                           Sem Imagem
                         </div>
                       )}
+                      
+                      {/* --- NOVO: BADGE DE NOTA MÉDIA --- */}
+                      {!isSearching && game.average_score !== undefined && (
+                         <div className="absolute top-2 right-2 bg-black/80 backdrop-blur-md border border-primary text-primary font-black text-sm px-2 py-1 rounded flex items-center gap-1 shadow-lg z-20">
+                            <Star className="w-3 h-3 fill-primary" />
+                            {game.average_score.toFixed(1)}
+                         </div>
+                      )}
+
                       <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/20 to-transparent opacity-80 transition-opacity group-hover:opacity-60" />
                     </div>
 
@@ -218,9 +197,14 @@ const Index = () => {
                 ))}
                 
                 {!loading && games.length === 0 && (
-                  <p className="col-span-full text-center text-gray-500 py-10">
-                    Nenhum jogo encontrado.
-                  </p>
+                  <div className="col-span-full text-center py-20">
+                    <p className="text-gray-400 text-lg mb-2">
+                       {isSearching ? "Nenhum jogo encontrado." : "Ainda não há avaliações na comunidade."}
+                    </p>
+                    {!isSearching && (
+                        <p className="text-sm text-gray-600">Seja o primeiro a avaliar um jogo!</p>
+                    )}
+                  </div>
                 )}
               </div>
             </div>
