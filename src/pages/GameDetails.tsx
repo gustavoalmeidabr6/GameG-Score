@@ -2,7 +2,11 @@ import { useState, useEffect } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
-import { ArrowLeft } from "lucide-react";
+import { ArrowLeft, MessageSquare, Heart, Send, User as UserIcon } from "lucide-react";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
+import { Textarea } from "@/components/ui/textarea";
+import { ScrollArea } from "@/components/ui/scroll-area";
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 
 // --- TIPOS ---
 type GameDetails = {
@@ -10,7 +14,6 @@ type GameDetails = {
   name: string;
   deck: string; 
   image: { medium_url: string; };
-  // Agora pegamos os gêneros
   genres?: { name: string }[]; 
 };
 
@@ -20,6 +23,20 @@ type ReviewForm = {
   narrativa: number;
   audio: number;
   desempenho: number;
+};
+
+type CommentData = {
+  id: number;
+  content: string;
+  created_at: string;
+  likes: number;
+  user_liked: boolean;
+  author: {
+    id: number;
+    username: string;
+    nickname: string;
+    avatar_url: string;
+  };
 };
 
 const defaultReviewState = {
@@ -73,6 +90,13 @@ const GameDetails = () => {
   const [game, setGame] = useState<GameDetails | null>(null);
   const [review, setReview] = useState<ReviewForm>(defaultReviewState);
   const [averageScore, setAverageScore] = useState<number | null>(5.0);
+  
+  // Estados de Comentários
+  const [discussionInfo, setDiscussionInfo] = useState<{ total: number, top_comment: CommentData | null }>({ total: 0, top_comment: null });
+  const [allComments, setAllComments] = useState<CommentData[]>([]);
+  const [newComment, setNewComment] = useState("");
+  const [isCommentsOpen, setIsCommentsOpen] = useState(false);
+
   const [loading, setLoading] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
@@ -84,48 +108,65 @@ const GameDetails = () => {
     desempenho: <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 20a8 8 0 1 0 0-16 8 8 0 0 0 0 16Z"/><path d="M12 14a2 2 0 1 0 0-4 2 2 0 0 0 0 4Z"/><path d="M12 2v2"/><path d="M12 22v-2"/><path d="m17 20.66-1-1.73"/><path d="M11 10.27 7 3.34"/><path d="m20.66 17-1.73-1"/><path d="m3.34 7 1.73 1"/><path d="M14 12h8"/><path d="M2 12h2"/><path d="m20.66 7-1.73 1"/><path d="m3.34 17 1.73-1"/><path d="m17 3.34-1 1.73"/><path d="m11 13.73-4 6.93"/></svg>
   };
 
-  useEffect(() => {
+  // Função auxiliar para carregar dados do jogo e discussão
+  const loadData = async () => {
     if (!id) return;
+    setLoading(true);
+    const userId = localStorage.getItem("userId") || "-1"; 
 
-    const loadData = async () => {
-      setLoading(true);
-      const userId = localStorage.getItem("userId") || "1"; 
-
-      try {
-        const gameRes = await fetch(`/api/game/${id}`);
-        const gameData = await gameRes.json();
-        
-        if (gameData && gameData.name) {
-          setGame(gameData);
-        } else {
-          toast.error("Jogo não encontrado.");
-          navigate("/home");
-          return;
-        }
-
-        const reviewRes = await fetch(`/api/review?game_id=${id}&owner_id=${userId}`);
-        const reviewData = await reviewRes.json();
-
-        if (!reviewData.error) {
-          setReview({
-            jogabilidade: reviewData.jogabilidade,
-            graficos: reviewData.graficos,
-            narrativa: reviewData.narrativa,
-            audio: reviewData.audio,
-            desempenho: reviewData.desempenho,
-          });
-          setAverageScore(reviewData.nota_geral);
-        }
-      } catch (error) {
-        console.error("Erro ao carregar dados:", error);
-        toast.error("Erro ao carregar informações.");
-      } finally {
-        setLoading(false);
+    try {
+      const gameRes = await fetch(`/api/game/${id}`);
+      const gameData = await gameRes.json();
+      
+      if (gameData && gameData.name) {
+        setGame(gameData);
+      } else {
+        toast.error("Jogo não encontrado.");
+        navigate("/home");
+        return;
       }
-    };
 
+      const reviewRes = await fetch(`/api/review?game_id=${id}&owner_id=${userId}`);
+      const reviewData = await reviewRes.json();
+
+      if (!reviewData.error) {
+        setReview({
+          jogabilidade: reviewData.jogabilidade,
+          graficos: reviewData.graficos,
+          narrativa: reviewData.narrativa,
+          audio: reviewData.audio,
+          desempenho: reviewData.desempenho,
+        });
+        setAverageScore(reviewData.nota_geral);
+      }
+
+      // Carregar Discussão (Top Comment + Total)
+      const discussRes = await fetch(`/api/game/${id}/discussion?user_id=${userId}`);
+      if (discussRes.ok) {
+        setDiscussionInfo(await discussRes.json());
+      }
+
+    } catch (error) {
+      console.error("Erro ao carregar dados:", error);
+      toast.error("Erro ao carregar informações.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
     loadData();
   }, [id, navigate]);
+
+  // Carregar todos os comentários ao abrir o modal
+  useEffect(() => {
+    if (isCommentsOpen && id) {
+        const userId = localStorage.getItem("userId") || "-1";
+        fetch(`/api/game/${id}/comments/all?user_id=${userId}`)
+            .then(res => res.json())
+            .then(data => setAllComments(data));
+    }
+  }, [isCommentsOpen, id]);
 
   const handleReviewChange = (key: keyof ReviewForm, value: number) => {
     const updatedReview = { ...review, [key]: value };
@@ -148,7 +189,6 @@ const GameDetails = () => {
     if (isSubmitting) return;
     setIsSubmitting(true);
 
-    // Pega o primeiro gênero da lista, se houver
     const genreName = game.genres && game.genres.length > 0 ? game.genres[0].name : "Desconhecido";
 
     const reviewData = { 
@@ -156,7 +196,7 @@ const GameDetails = () => {
       game_id: game.id, 
       game_name: game.name,
       game_image_url: game.image?.medium_url || "",
-      genre: genreName, // Enviando o gênero para o backend
+      genre: genreName, 
       owner_id: parseInt(userId)
     };
     
@@ -170,8 +210,6 @@ const GameDetails = () => {
       if (response.ok) {
         toast.success("Review salva com sucesso!");
       } else {
-        const errorData = await response.json();
-        console.error(errorData);
         toast.error("Erro ao salvar review.");
       }
     } catch (error) {
@@ -180,6 +218,109 @@ const GameDetails = () => {
       setIsSubmitting(false);
     }
   };
+
+  const handlePostComment = async () => {
+    const userId = localStorage.getItem("userId");
+    if (!userId) {
+        toast.error("Faça login para comentar.");
+        return;
+    }
+    if (!newComment.trim()) return;
+
+    try {
+        const res = await fetch("/api/comments", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+                game_id: game?.id,
+                user_id: parseInt(userId),
+                content: newComment
+            })
+        });
+
+        if (res.ok) {
+            toast.success("Comentário enviado!");
+            setNewComment("");
+            // Recarrega os dados para atualizar o top comment e a lista
+            loadData();
+            if (isCommentsOpen) {
+                const allRes = await fetch(`/api/game/${id}/comments/all?user_id=${userId}`);
+                setAllComments(await allRes.json());
+            }
+        } else {
+            toast.error("Erro ao enviar.");
+        }
+    } catch (e) {
+        console.error(e);
+    }
+  };
+
+  const handleLike = async (commentId: number) => {
+    const userId = localStorage.getItem("userId");
+    if (!userId) {
+        toast.error("Faça login para curtir.");
+        return;
+    }
+
+    try {
+        const res = await fetch(`/api/comments/${commentId}/like`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ user_id: parseInt(userId), comment_id: commentId })
+        });
+
+        if (res.ok) {
+            // Atualiza localmente para parecer rápido
+            const updateList = (list: CommentData[]) => list.map(c => {
+                if (c.id === commentId) {
+                    const liked = !c.user_liked;
+                    return { ...c, user_liked: liked, likes: c.likes + (liked ? 1 : -1) };
+                }
+                return c;
+            });
+
+            setAllComments(updateList(allComments));
+            if (discussionInfo.top_comment && discussionInfo.top_comment.id === commentId) {
+                setDiscussionInfo({
+                    ...discussionInfo,
+                    top_comment: updateList([discussionInfo.top_comment])[0]
+                });
+            }
+        }
+    } catch (e) { console.error(e); }
+  };
+
+  // Componente de Comentário Individual
+  const CommentItem = ({ comment }: { comment: CommentData }) => (
+    <div className="bg-black/40 p-4 rounded-lg border border-white/5 flex gap-4 mb-3">
+        <div onClick={() => navigate(`/profile/${comment.author.id}`)} className="cursor-pointer">
+            <Avatar className="h-10 w-10 border border-primary/30 hover:border-primary transition-colors">
+                <AvatarImage src={comment.author.avatar_url} />
+                <AvatarFallback><UserIcon className="w-4 h-4" /></AvatarFallback>
+            </Avatar>
+        </div>
+        <div className="flex-1">
+            <div className="flex justify-between items-start">
+                <div>
+                    <p 
+                        onClick={() => navigate(`/profile/${comment.author.id}`)}
+                        className="font-bold text-sm text-white hover:text-primary cursor-pointer transition-colors"
+                    >
+                        {comment.author.nickname}
+                    </p>
+                    <p className="text-xs text-gray-500 mb-2">@{comment.author.username}</p>
+                </div>
+                <div className="flex items-center gap-2 bg-black/50 px-3 py-1.5 rounded-full text-xs">
+                    <button onClick={() => handleLike(comment.id)} className={`${comment.user_liked ? 'text-red-500' : 'text-gray-400'} hover:scale-110 transition`}>
+                        <Heart className={`w-5 h-5 ${comment.user_liked ? 'fill-red-500' : ''}`} />
+                    </button>
+                    <span className="text-gray-300 font-mono text-sm font-bold">{comment.likes}</span>
+                </div>
+            </div>
+            <p className="text-gray-300 text-base leading-relaxed mt-1">{comment.content}</p>
+        </div>
+    </div>
+  );
 
   if (loading) {
     return <div className="min-h-screen bg-[#0A0A0A] flex items-center justify-center text-white font-pixel">CARREGANDO DADOS...</div>;
@@ -218,6 +359,66 @@ const GameDetails = () => {
                   {game.deck || "Sem descrição disponível para este jogo."}
                 </p>
               </div>
+
+              {/* --- NOVA ÁREA DE COMENTÁRIOS (Destaque) --- */}
+              <div className="mt-6 pt-6 border-t border-white/10">
+                 <div className="flex items-center justify-between mb-4">
+                    <h3 className="text-[#3bbe5d] font-bold font-pixel text-sm tracking-wider flex items-center gap-2">
+                        <MessageSquare className="w-4 h-4" /> 
+                        DISCUSSÃO DA COMUNIDADE ({discussionInfo.total})
+                    </h3>
+                    
+                    <Dialog open={isCommentsOpen} onOpenChange={setIsCommentsOpen}>
+                        <DialogTrigger asChild>
+                            <Button variant="link" className="text-primary text-xs">
+                                {discussionInfo.total > 0 ? "Ver todos os comentários" : "Seja o primeiro a comentar"}
+                            </Button>
+                        </DialogTrigger>
+                        <DialogContent className="bg-[#1a1c1f] border-primary/20 text-white max-w-2xl h-[80vh] flex flex-col">
+                            <DialogHeader>
+                                <DialogTitle className="font-pixel text-primary">Comentários: {game.name}</DialogTitle>
+                            </DialogHeader>
+                            <ScrollArea className="flex-1 pr-4">
+                                {allComments.length > 0 ? (
+                                    allComments.map(comment => <CommentItem key={comment.id} comment={comment} />)
+                                ) : (
+                                    <p className="text-center text-gray-500 py-10">Ainda não há comentários.</p>
+                                )}
+                            </ScrollArea>
+                            <div className="pt-4 border-t border-white/10 flex gap-2">
+                                <Textarea 
+                                    placeholder="Escreva sua opinião..." 
+                                    value={newComment}
+                                    onChange={(e) => setNewComment(e.target.value)}
+                                    className="bg-black/30 border-white/10 text-white resize-none"
+                                />
+                                <Button onClick={handlePostComment} className="bg-primary text-black hover:bg-primary/80 h-auto">
+                                    <Send className="w-4 h-4" />
+                                </Button>
+                            </div>
+                        </DialogContent>
+                    </Dialog>
+                 </div>
+
+                 {/* Top Comment Preview */}
+                 {discussionInfo.top_comment ? (
+                    <div className="relative group">
+                        <div className="absolute -left-1 top-0 bottom-0 w-1 bg-primary rounded-l-full opacity-50"></div>
+                        <div className="pl-4">
+                            <CommentItem comment={discussionInfo.top_comment} />
+                        </div>
+                    </div>
+                 ) : (
+                    <div className="bg-black/20 border border-dashed border-white/10 rounded-lg p-6 text-center">
+                        <p className="text-gray-500 text-sm italic mb-2">Nenhum comentário em destaque ainda.</p>
+                        <Button variant="outline" size="sm" onClick={() => setIsCommentsOpen(true)} className="border-primary/30 text-primary hover:bg-primary/10">
+                            Iniciar discussão
+                        </Button>
+                    </div>
+                 )}
+              </div>
+              {/* ----------------------------------------- */}
+
             </div>
           </div>
 
