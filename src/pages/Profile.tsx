@@ -3,7 +3,8 @@ import { useNavigate, useParams, Link } from "react-router-dom";
 import { 
   ArrowLeft, Edit, TrendingUp, Star, Award, ExternalLink, 
   Trophy, Medal, Zap, Crown, Flame, Link as LinkIcon, Frown, 
-  Gamepad2, List, Trash2 
+  Gamepad2, List, Trash2, MessageSquare, Heart, Quote,
+  Shield, Eye, Headphones, Book, Cpu, Sword, Map, Scale, AlertTriangle
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { RadarChart } from "@/components/RadarChart";
@@ -28,9 +29,15 @@ const PLATFORMS = [
 export default function Profile() {
   const navigate = useNavigate();
   const { userId } = useParams(); 
+  
   const [profile, setProfile] = useState<any>(null);
   const [allGames, setAllGames] = useState<any[]>([]);
   const [allTierlists, setAllTierlists] = useState<any[]>([]);
+  
+  // Novos estados para comentários
+  const [userComments, setUserComments] = useState<any[]>([]);
+  const [bestComment, setBestComment] = useState<any>(null);
+
   const [loading, setLoading] = useState(true);
   const [editDialogOpen, setEditDialogOpen] = useState(false);
   const [isOwner, setIsOwner] = useState(false); 
@@ -60,7 +67,7 @@ export default function Profile() {
       const gamesRes = await fetch(`/api/user_games/${targetId}`);
       if (gamesRes.ok) {
         const gamesData = await gamesRes.json();
-        // --- ALTERAÇÃO AQUI: Ordenar por nota (maior para menor) ---
+        // Ordena do maior score para o menor
         gamesData.sort((a: any, b: any) => (b.nota_geral || 0) - (a.nota_geral || 0));
         setAllGames(gamesData);
       }
@@ -69,6 +76,18 @@ export default function Profile() {
       const tierRes = await fetch(`/api/tierlists/${targetId}`);
       if (tierRes.ok) {
         setAllTierlists(await tierRes.json());
+      }
+
+      // 4. Buscar Comentários (Melhor e Todos)
+      const bestCommentRes = await fetch(`/api/user/${targetId}/best_comment`);
+      if (bestCommentRes.ok) {
+        const bestData = await bestCommentRes.json();
+        setBestComment(bestData);
+      }
+
+      const allCommentsRes = await fetch(`/api/user/${targetId}/comments`);
+      if (allCommentsRes.ok) {
+        setUserComments(await allCommentsRes.json());
       }
 
     } catch (error) {
@@ -99,7 +118,6 @@ export default function Profile() {
       
       if (res.ok) {
         toast.success("Tierlist excluída!");
-        // Atualiza a lista localmente removendo a deletada
         setAllTierlists(prev => prev.filter(t => t.id !== tierlistId));
       } else {
         const err = await res.json();
@@ -112,20 +130,39 @@ export default function Profile() {
 
   if (loading || !profile) return <div className="min-h-screen bg-black flex items-center justify-center text-white">Carregando...</div>;
 
-  const userAverage = profile.top_favorites?.length > 0
-    ? (profile.top_favorites.reduce((acc: any, curr: any) => acc + curr.nota_geral, 0) / profile.top_favorites.length).toFixed(1)
+  // CORREÇÃO: Usar a média que vem do backend (baseada em TODOS os jogos)
+  const userAverage = profile.stats?.average_score 
+    ? Number(profile.stats.average_score).toFixed(1) 
     : "0.0";
 
   const ACHIEVEMENTS_LIST = [
+    // --- ORIGINAIS ---
     { key: "first_review", title: "Primeiros Passos", desc: "Avalie o primeiro jogo", icon: <Star className="w-6 h-6 text-[#3bbe5d]" /> },
     { key: "five_reviews", title: "Crítico em Ascensão", desc: "Avalie 5 jogos", icon: <TrendingUp className="w-6 h-6 text-[#3bbe5d]" /> },
     { key: "ten_reviews", title: "Crítico de Elite", desc: "Avalie 10 jogos", icon: <Medal className="w-6 h-6 text-[#3bbe5d]" /> },
-    { key: "fps_king", title: "Rei do FPS", desc: "Avaliou mais de 20 jogos de Tiro", icon: <Flame className="w-6 h-6 text-[#3bbe5d]" /> },
+    { key: "fps_king", title: "Rei do FPS", desc: "20+ jogos de Tiro", icon: <Flame className="w-6 h-6 text-[#3bbe5d]" /> },
     { key: "high_score", title: "Nota Máxima", desc: "Dê nota 10 em uma categoria", icon: <Zap className="w-6 h-6 text-[#3bbe5d]" /> },
-    { key: "perfect_game", title: "Perfeccionista", desc: "Defina um jogo como perfeito (10 em tudo)", icon: <Crown className="w-6 h-6 text-[#3bbe5d]" /> },
-    { key: "hater", title: "Exigente", desc: "Deu uma nota geral menor que 3", icon: <Frown className="w-6 h-6 text-[#3bbe5d]" /> },
+    { key: "perfect_game", title: "Perfeccionista", desc: "Jogo perfeito (10 em tudo)", icon: <Crown className="w-6 h-6 text-[#3bbe5d]" /> },
+    { key: "hater", title: "Exigente", desc: "Nota geral menor que 3", icon: <Frown className="w-6 h-6 text-[#3bbe5d]" /> },
     { key: "connected", title: "Conectado", desc: "Adicionou uma rede social", icon: <LinkIcon className="w-6 h-6 text-[#3bbe5d]" /> },
-    { key: "veteran", title: "Veterano", desc: "Chegou ao nível 5", icon: <Trophy className="w-6 h-6 text-[#3bbe5d]" /> },
+    { key: "veteran", title: "Veterano", desc: "Nível 5", icon: <Trophy className="w-6 h-6 text-[#3bbe5d]" /> },
+
+    // --- NOVAS (15 ADICIONAIS) ---
+    { key: "review_pro", title: "Crítico de Bronze", desc: "25+ Avaliações", icon: <Shield className="w-6 h-6 text-[#cd7f32]" /> },
+    { key: "review_legend", title: "Crítico de Prata", desc: "50+ Avaliações", icon: <Shield className="w-6 h-6 text-[#c0c0c0]" /> },
+    { key: "visual_master", title: "Olhos de Águia", desc: "Deu 10 em Gráficos", icon: <Eye className="w-6 h-6 text-[#3bbe5d]" /> },
+    { key: "audio_master", title: "Audiófilo", desc: "Deu 10 em Áudio", icon: <Headphones className="w-6 h-6 text-[#3bbe5d]" /> },
+    { key: "narrative_master", title: "Leitor Voraz", desc: "Deu 10 em Narrativa", icon: <Book className="w-6 h-6 text-[#3bbe5d]" /> },
+    { key: "gameplay_master", title: "Tryhard", desc: "Deu 10 em Jogabilidade", icon: <Gamepad2 className="w-6 h-6 text-[#3bbe5d]" /> },
+    { key: "performance_master", title: "60 FPS", desc: "Deu 10 em Desempenho", icon: <Cpu className="w-6 h-6 text-[#3bbe5d]" /> },
+    { key: "rpg_fan", title: "Mestre de RPG", desc: "5+ RPGs avaliados", icon: <Sword className="w-6 h-6 text-[#3bbe5d]" /> },
+    { key: "action_fan", title: "Herói de Ação", desc: "5+ Jogos de Ação", icon: <Zap className="w-6 h-6 text-[#3bbe5d]" /> },
+    { key: "adventure_fan", title: "Explorador", desc: "5+ Jogos de Aventura", icon: <Map className="w-6 h-6 text-[#3bbe5d]" /> },
+    { key: "social_star", title: "Influencer", desc: "Todas redes conectadas", icon: <Trophy className="w-6 h-6 text-[#ffd700]" /> },
+    { key: "elite_gamer", title: "Lenda Viva", desc: "Nível 10 alcançado", icon: <Crown className="w-6 h-6 text-[#ffd700]" /> },
+    { key: "balanced", title: "Equilibrado", desc: "Deu nota exata 5.0", icon: <Scale className="w-6 h-6 text-[#3bbe5d]" /> },
+    { key: "pure_love", title: "Amor Puro", desc: "Deu 10 na Nota Final", icon: <Heart className="w-6 h-6 text-[#ff0000]" /> },
+    { key: "harsh_critic", title: "Carrasco", desc: "Média geral < 6.0", icon: <AlertTriangle className="w-6 h-6 text-[#ff4500]" /> },
   ];
 
   const unlockedAchievements = ACHIEVEMENTS_LIST.filter(ach => profile.achievements && profile.achievements[ach.key]);
@@ -180,22 +217,45 @@ export default function Profile() {
           {/* ÁREA DE ABAS */}
           <Tabs defaultValue="overview" className="w-full">
             <div className="flex justify-center mb-8">
-              <TabsList className="bg-black/60 border border-primary/20 p-1">
-                <TabsTrigger value="overview" className="data-[state=active]:bg-primary data-[state=active]:text-black px-6">
-                   <Award className="w-4 h-4 mr-2" /> Visão Geral
+              <TabsList className="bg-black/60 border border-primary/20 p-1 grid grid-cols-4 w-full max-w-3xl">
+                <TabsTrigger value="overview" className="data-[state=active]:bg-primary data-[state=active]:text-black text-xs md:text-sm">
+                   <Award className="w-4 h-4 mr-2 hidden md:inline" /> Visão Geral
                 </TabsTrigger>
-                <TabsTrigger value="library" className="data-[state=active]:bg-primary data-[state=active]:text-black px-6">
-                   <Gamepad2 className="w-4 h-4 mr-2" /> Biblioteca ({allGames.length})
+                <TabsTrigger value="library" className="data-[state=active]:bg-primary data-[state=active]:text-black text-xs md:text-sm">
+                   <Gamepad2 className="w-4 h-4 mr-2 hidden md:inline" /> Jogos ({allGames.length})
                 </TabsTrigger>
-                <TabsTrigger value="tierlists" className="data-[state=active]:bg-primary data-[state=active]:text-black px-6">
-                   <List className="w-4 h-4 mr-2" /> Tierlists ({allTierlists.length})
+                <TabsTrigger value="comments" className="data-[state=active]:bg-primary data-[state=active]:text-black text-xs md:text-sm">
+                   <MessageSquare className="w-4 h-4 mr-2 hidden md:inline" /> Comentários ({userComments.length})
+                </TabsTrigger>
+                <TabsTrigger value="tierlists" className="data-[state=active]:bg-primary data-[state=active]:text-black text-xs md:text-sm">
+                   <List className="w-4 h-4 mr-2 hidden md:inline" /> Tierlists ({allTierlists.length})
                 </TabsTrigger>
               </TabsList>
             </div>
 
-            {/* CONTEÚDO: VISÃO GERAL (O que já existia) */}
+            {/* CONTEÚDO: VISÃO GERAL */}
             <TabsContent value="overview" className="space-y-6 animate-fade-in">
               
+              {/* --- DESTAQUE DO MELHOR COMENTÁRIO --- */}
+              {bestComment && (
+                <div className="glass-panel rounded-xl border border-primary/30 p-6 bg-black/60 relative overflow-hidden">
+                    <div className="absolute top-0 right-0 p-4 opacity-10">
+                        <Quote className="w-24 h-24 text-primary" />
+                    </div>
+                    <h3 className="text-sm font-bold text-primary uppercase tracking-widest mb-4 flex items-center gap-2">
+                        <Heart className="w-4 h-4 fill-primary" /> Maior Contribuição ({bestComment.likes} Likes)
+                    </h3>
+                    <div className="relative z-10">
+                        <p className="text-xl md:text-2xl font-serif italic text-white mb-4">"{bestComment.content}"</p>
+                        <Link to={`/game/${bestComment.game_id}`} className="text-sm text-gray-400 hover:text-primary transition-colors flex items-center gap-2">
+                            <Gamepad2 className="w-4 h-4" />
+                            Em: <span className="font-bold underline">{bestComment.game_name}</span>
+                        </Link>
+                    </div>
+                </div>
+              )}
+              {/* ------------------------------------------- */}
+
               <div className="glass-panel rounded-2xl border-2 border-primary/30 p-8 bg-black/60">
                 <h2 className="text-2xl font-black text-primary uppercase tracking-wider mb-8 text-center font-pixel">
                   {isOwner ? "Meus Top 3 Jogos" : `Top 3 de ${profile.nickname || profile.username}`}
@@ -317,7 +377,7 @@ export default function Profile() {
                     {unlockedAchievements.map((achievement) => (
                       <div 
                         key={achievement.key}
-                        className="relative p-4 rounded-xl border border-[#3bbe5d]/50 bg-[#3bbe5d]/10 shadow-[0_0_15px_rgba(59,190,93,0.2)] flex flex-col items-center text-center transition-all duration-300"
+                        className="relative p-4 rounded-xl border border-[#3bbe5d]/50 bg-[#3bbe5d]/10 shadow-[0_0_15px_rgba(59,190,93,0.2)] flex flex-col items-center text-center transition-all duration-300 hover:scale-105 cursor-default"
                       >
                         <div className="p-3 rounded-full mb-3 bg-black/40">
                           {achievement.icon}
@@ -356,7 +416,7 @@ export default function Profile() {
                               className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-110"
                             />
 
-                            {/* NOTA DO JOGO NO CANTINHO */}
+                            {/* NOTA DO JOGO */}
                             <div className="absolute top-2 right-2 bg-black/80 border border-primary text-primary font-black text-xs px-2 py-1 rounded-md shadow-lg z-10">
                                {typeof game.nota_geral === 'number' ? game.nota_geral.toFixed(1) : "?"}
                             </div>
@@ -375,6 +435,42 @@ export default function Profile() {
                     <div className="flex flex-col items-center justify-center py-20 text-gray-500">
                        <Gamepad2 className="w-16 h-16 mb-4 opacity-20" />
                        <p>Este usuário ainda não avaliou nenhum jogo.</p>
+                    </div>
+                  )}
+               </div>
+            </TabsContent>
+
+            {/* CONTEÚDO: COMENTÁRIOS */}
+            <TabsContent value="comments" className="animate-fade-in">
+               <div className="glass-panel rounded-2xl border-2 border-primary/30 p-8 bg-black/60 min-h-[50vh]">
+                  <h3 className="text-xl font-bold mb-6 flex items-center gap-2 border-b border-white/10 pb-4">
+                    <span className="text-primary">💬</span> Histórico de Comentários
+                  </h3>
+                  {userComments.length > 0 ? (
+                    <div className="space-y-4">
+                      {userComments.map((comment) => (
+                        <div key={comment.id} className="bg-[#1a1c1f] p-6 rounded-xl border border-white/5 hover:border-primary/30 transition-all relative group">
+                           <div className="flex justify-between items-start mb-3">
+                              <Link to={`/game/${comment.game_id}`} className="text-lg font-bold text-primary hover:underline flex items-center gap-2">
+                                 <Gamepad2 className="w-4 h-4" /> {comment.game_name}
+                              </Link>
+                              <div className="flex items-center gap-1 text-gray-400 bg-black/40 px-3 py-1 rounded-full text-sm font-mono">
+                                 <Heart className="w-4 h-4" /> {comment.likes}
+                              </div>
+                           </div>
+                           <p className="text-gray-300 leading-relaxed text-base pl-4 border-l-2 border-primary/50 italic">
+                              "{comment.content}"
+                           </p>
+                           <div className="mt-4 text-xs text-gray-600 flex justify-end">
+                              {new Date(comment.created_at).toLocaleDateString()}
+                           </div>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="flex flex-col items-center justify-center py-20 text-gray-500">
+                       <MessageSquare className="w-16 h-16 mb-4 opacity-20" />
+                       <p>Nenhum comentário postado ainda.</p>
                     </div>
                   )}
                </div>
