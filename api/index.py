@@ -1,10 +1,11 @@
-from fastapi import FastAPI, Depends, HTTPException
+from fastapi import FastAPI, Depends, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 import requests
 import os
 import time
 import json
-from pydantic import BaseModel, Json
+import re
+from pydantic import BaseModel
 from typing import Optional, List, Dict, Any
 from datetime import datetime
 
@@ -13,6 +14,7 @@ load_dotenv()
 
 import bcrypt
 
+# --- CONFIGURAÇÃO DE SEGURANÇA (BCRYPT) ---
 def verify_password(plain_password, hashed_password):
     try:
         password_bytes = plain_password.encode('utf-8')
@@ -28,7 +30,8 @@ def get_password_hash(password):
     hashed = bcrypt.hashpw(pwd_bytes, salt)
     return hashed.decode('utf-8')
 
-from sqlalchemy import create_engine, Column, Integer, String, Float, ForeignKey, desc, Boolean, Text, or_, and_, func
+# --- CONFIGURAÇÃO DO BANCO DE DADOS (SQLALCHEMY) ---
+from sqlalchemy import create_engine, Column, Integer, String, Float, ForeignKey, desc, Boolean, Text, or_, func
 from sqlalchemy.orm import sessionmaker, declarative_base, Session
 
 engine = None
@@ -76,7 +79,6 @@ class Tierlist(Base):
     data = Column(Text)
     owner_id = Column(Integer, ForeignKey("users.id"))
 
-# --- NOVAS TABELAS PARA COMENTÁRIOS ---
 class Comment(Base):
     __tablename__ = "comments"
     id = Column(Integer, primary_key=True, index=True)
@@ -91,22 +93,20 @@ class CommentLike(Base):
     user_id = Column(Integer, ForeignKey("users.id"))
     comment_id = Column(Integer, ForeignKey("comments.id"))
 
-# ---------------------------------------
-
+# --- CONEXÃO COM O BANCO ---
 def get_db():
     global engine, SessionLocal
     try:
         if engine is None:
             DATABASE_URL = os.environ.get('POSTGRES_URL_NON_POOLING')
             if not DATABASE_URL: 
-                raise ValueError("Nenhuma URL de banco de dados encontrada no .env!")
+                # Fallback para desenvolvimento local caso não haja URL
+                DATABASE_URL = "sqlite:///./test.db"
             if DATABASE_URL.startswith("postgres://"):
                 DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql://", 1)
+            
             engine = create_engine(DATABASE_URL)
             SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
-            
-            # Tenta criar apenas as tabelas novas se elas não existirem
-            # Isso é seguro e não apaga dados antigos
             Base.metadata.create_all(bind=engine)
             
         db = SessionLocal()
@@ -172,7 +172,269 @@ class LikeInput(BaseModel):
     user_id: int
     comment_id: int
 
-# --- ROTAS GERAIS ---
+# ==============================================================================
+#  INTEGRAÇÃO IGDB (NOVO SISTEMA DE JOGOS)
+# ==============================================================================
+
+IGDB_ACCESS_TOKEN = None
+IGDB_TOKEN_EXPIRY = 0
+
+def get_igdb_headers():
+    """Gerencia a autenticação com a Twitch/IGDB automaticamente"""
+    global IGDB_ACCESS_TOKEN, IGDB_TOKEN_EXPIRY
+    
+    client_id = os.environ.get("IGDB_CLIENT_ID")
+    client_secret = os.environ.get("IGDB_CLIENT_SECRET")
+    
+    if not client_id or not client_secret:
+        print("ERRO: Faltam as chaves IGDB_CLIENT_ID ou IGDB_CLIENT_SECRET no .env")
+        return None
+
+    # Se o token não existe ou expirou, pega um novo
+    if not IGDB_ACCESS_TOKEN or time.time() > IGDB_TOKEN_EXPIRY:
+        try:
+            url = f"https://id.twitch.tv/oauth2/token?client_id={client_id}&client_secret={client_secret}&grant_type=client_credentials"
+            response = requests.post(url)
+            data = response.json()
+            IGDB_ACCESS_TOKEN = data["access_token"]
+            IGDB_TOKEN_EXPIRY = time.time() + data["expires_in"] - 60 # Margem de segurança
+        except Exception as e:
+            print(f"Erro ao pegar token IGDB: {e}")
+            return None
+
+    return {
+        "Client-ID": client_id,
+        "Authorization": f"Bearer {IGDB_ACCESS_TOKEN}",
+    }
+
+def format_igdb_image(url, size="t_cover_big"):
+    """Corrige a URL da imagem que vem da IGDB"""
+    if not url: return ""
+    # A IGDB retorna //images.igdb.com... precisamos adicionar https:
+    if url.startswith("//"):
+        url = "https:" + url
+    # Troca o tamanho da imagem (thumb é muito pequeno)
+    return url.replace("t_thumb", size)
+
+# ==============================================================================
+#  INTEGRAÇÃO STEAM (NOVO)
+# ==============================================================================
+
+@app.get("/api/steam/library")
+def get_steam_library(steam_id: str):
+    """Busca os jogos da conta Steam do usuário"""
+    api_key = os.environ.get("STEAM_API_KEY")
+    if not api_key:
+        raise HTTPException(status_code=500, detail="Chave da Steam não configurada no servidor.")
+
+    # 1. Resolve Vanity URL se não for um número (ex: 'gustavo' em vez de '7656...')
+    target_id = steam_id
+    if not steam_id.isdigit():
+        try:
+            resolve_url = f"http://api.steampowered.com/ISteamUser/ResolveVanityURL/v0001/?key={api_key}&vanityurl={steam_id}"
+            resp = requests.get(resolve_url).json()
+            if resp.get('response', {}).get('success') == 1:
+                target_id = resp['response']['steamid']
+        except:
+            pass # Se falhar, tenta usar o ID original
+
+    # 2. Busca os jogos
+    url = f"http://api.steampowered.com/IPlayerService/GetOwnedGames/v0001/?key={api_key}&steamid={target_id}&include_appinfo=1&include_played_free_games=1&format=json"
+    
+    try:
+        response = requests.get(url)
+        data = response.json()
+        games = data.get("response", {}).get("games", [])
+        
+        # Formata para o padrão do frontend
+        formatted_games = []
+        for game in games:
+            # Imagem da Steam: http://media.steampowered.com/steamcommunity/public/images/apps/{appid}/{hash}.jpg
+            img_hash = game.get("img_icon_url")
+            app_id = game.get("appid")
+            
+            image_url = ""
+            if img_hash:
+                image_url = f"http://media.steampowered.com/steamcommunity/public/images/apps/{app_id}/{img_hash}.jpg"
+
+            formatted_games.append({
+                "id": app_id, # Nota: ID da Steam é diferente do ID da IGDB
+                "name": game.get("name"),
+                "image": {"medium_url": image_url, "thumb_url": image_url},
+                "playtime_forever": game.get("playtime_forever", 0) # Minutos jogados
+            })
+            
+        # Ordena por tempo de jogo (mais jogados primeiro)
+        formatted_games.sort(key=lambda x: x['playtime_forever'], reverse=True)
+        return formatted_games[:50] # Retorna apenas os top 50 para não pesar
+
+    except Exception as e:
+        return {"error": f"Erro ao buscar Steam: {str(e)}"}
+
+
+# ==============================================================================
+#  ROTAS DE JOGOS (MODIFICADAS PARA IGDB + STEAM STORE)
+# ==============================================================================
+
+@app.get("/api/search")
+def search_games(q: str = None):
+    if not q: return []
+    
+    headers = get_igdb_headers()
+    if not headers: return [] # Falha na auth
+
+    url = "https://api.igdb.com/v4/games"
+    
+    # Query na linguagem da IGDB (Apicalypse)
+    # Busca por nome, onde tenha capa (cover != null)
+    body = f'search "{q}"; fields name, cover.url, genres.name, first_release_date; where cover != null; limit 20;'
+    
+    try:
+        response = requests.post(url, headers=headers, data=body)
+        games = response.json()
+        
+        results = []
+        for game in games:
+            cover_url = ""
+            if "cover" in game:
+                cover_url = format_igdb_image(game["cover"]["url"])
+                
+            results.append({
+                "id": game["id"],
+                "name": game["name"],
+                "image": {
+                    "medium_url": cover_url,
+                    "thumb_url": cover_url
+                },
+                "release_date": game.get("first_release_date", "")
+            })
+        return results
+    except Exception as e:
+        print(f"Erro na busca IGDB: {e}")
+        return []
+
+@app.get("/api/game/{game_id}")
+def get_game(game_id: str, db: Session = Depends(get_db)):
+    # 1. Busca os dados na IGDB
+    headers = get_igdb_headers()
+    if not headers: return {}
+
+    url = "https://api.igdb.com/v4/games"
+    
+    # MUDANÇA CRUCIAL AQUI: Adicionei "external_games.category" e "external_games.uid"
+    # Sem isso, não conseguimos achar o ID da Steam para jogos modernos.
+    body = f'fields name, summary, cover.url, genres.name, involved_companies.company.name, platforms.name, screenshots.url, websites.url, websites.category, external_games.category, external_games.uid; where id = {game_id};'
+    
+    igdb_data = {}
+    steam_data = None
+    community_stats = {}
+    
+    try:
+        response = requests.post(url, headers=headers, data=body)
+        data = response.json()
+        if data:
+            igdb_data = data[0]
+    except Exception as e:
+        print(f"Erro IGDB: {e}")
+        return {}
+
+    # 2. ENCONTRAR O ID DA STEAM (Lógica Nova e Robusta)
+    steam_app_id = None
+
+    # Tenta PRIMEIRO pela lista oficial de External Games (Jogos como CS2 usam isto)
+    if "external_games" in igdb_data:
+        for ext in igdb_data["external_games"]:
+            # Categoria 1 na IGDB = Steam
+            if ext.get("category") == 1:
+                steam_app_id = ext.get("uid")
+                break
+    
+    # Se falhar, tenta pelo Website (Fallback para jogos mais antigos)
+    if not steam_app_id and "websites" in igdb_data:
+        for site in igdb_data["websites"]:
+            # Categoria 13 na IGDB = Link do site da Steam
+            if site.get("category") == 13: 
+                url_str = site.get("url", "")
+                match = re.search(r'app/(\d+)', url_str)
+                if match:
+                    steam_app_id = match.group(1)
+                    break
+    
+    # 3. CONSTRÓI O OBJETO STEAM SE TIVER ID
+    if steam_app_id:
+        steam_data = {}
+        steam_data["app_id"] = steam_app_id
+        # Cria o link imediatamente (isso garante que o botão "Ver na Loja" funcione)
+        steam_data["store_link"] = f"https://store.steampowered.com/app/{steam_app_id}/"
+        steam_data["is_free"] = False 
+        steam_data["current_players"] = 0
+        
+        try:
+            # API 1: Detalhes da Loja (Preço, Capa, Metacritic)
+            store_url = f"http://store.steampowered.com/api/appdetails?appids={steam_app_id}&cc=br&l=portuguese"
+            store_resp = requests.get(store_url, headers={"User-Agent": "GameGScore/1.0"}, timeout=3).json()
+            
+            if str(steam_app_id) in store_resp and store_resp[str(steam_app_id)]["success"]:
+                s_data = store_resp[str(steam_app_id)]["data"]
+                
+                steam_data["price_overview"] = s_data.get("price_overview", None)
+                steam_data["metacritic"] = s_data.get("metacritic")
+                steam_data["is_free"] = s_data.get("is_free", False)
+                steam_data["header_image"] = s_data.get("header_image")
+
+            # API 2: Jogadores Online (Pode falhar se a Steam estiver lenta)
+            players_url = f"https://api.steampowered.com/ISteamUserStats/GetNumberOfCurrentPlayers/v1/?appid={steam_app_id}"
+            players_resp = requests.get(players_url, headers={"User-Agent": "GameGScore/1.0"}, timeout=3).json()
+            if players_resp.get("response"):
+                steam_data["current_players"] = players_resp["response"].get("player_count", 0)
+
+        except Exception as e:
+            # Se a Steam falhar, não faz mal. O link já está salvo e o balão vai aparecer.
+            print(f"Aviso Steam: {e}")
+            pass
+
+    # 4. Calcula a nota da comunidade no Banco Local
+    try:
+        stats = db.query(func.avg(Review.nota_geral), func.count(Review.id)).filter(Review.game_id == int(game_id)).first()
+        avg_val = stats[0] if stats[0] is not None else 0
+        count_val = stats[1] if stats[1] is not None else 0
+        
+        community_stats["average_score"] = float(avg_val)
+        community_stats["total_reviews"] = int(count_val)
+    except Exception as e:
+        print(f"Erro DB Stats: {e}")
+        community_stats = {"average_score": 0, "total_reviews": 0}
+
+    # 5. Monta a resposta final
+    cover_med = ""
+    cover_high = ""
+    if "cover" in igdb_data:
+        cover_med = format_igdb_image(igdb_data["cover"]["url"], "t_cover_big")
+        cover_high = format_igdb_image(igdb_data["cover"]["url"], "t_1080p")
+
+    screenshots = []
+    if "screenshots" in igdb_data:
+        for s in igdb_data["screenshots"][:4]: 
+            screenshots.append(format_igdb_image(s["url"], "t_screenshot_big"))
+
+    return {
+        "id": igdb_data.get("id"),
+        "name": igdb_data.get("name"),
+        "deck": igdb_data.get("summary", "Sem descrição."),
+        "image": {
+            "medium_url": cover_med,
+            "original_url": cover_high
+        },
+        "genres": [{"name": g["name"]} for g in igdb_data.get("genres", [])],
+        "screenshots": screenshots,
+        "steam_data": steam_data,
+        "community_stats": community_stats
+    }
+
+
+# ==============================================================================
+#  ROTAS ANTIGAS (MANTIDAS IGUAIS)
+# ==============================================================================
 
 @app.get("/api/DANGEROUS-RESET-DB")
 def dangerous_reset_db(db: Session = Depends(get_db)):
@@ -211,13 +473,11 @@ def get_profile(user_id: int, db: Session = Depends(get_db)):
     user = db.query(User).filter(User.id == user_id).first()
     if not user: raise HTTPException(status_code=404, detail="Usuário não encontrado")
     
-    # Busca TODAS as reviews para calcular estatísticas completas
     all_reviews = db.query(Review).filter(Review.owner_id == user_id).all()
     review_count = len(all_reviews)
     
     genre_map = {}
     fps_count = 0
-    
     total_score_sum = 0
 
     for r in all_reviews:
@@ -228,7 +488,6 @@ def get_profile(user_id: int, db: Session = Depends(get_db)):
             genre_map[g_name] = {"count": 0, "total_score": 0.0}
         genre_map[g_name]["count"] += 1
         genre_map[g_name]["total_score"] += r.nota_geral
-        
         total_score_sum += r.nota_geral
 
     favorite_genre = "Nenhum"
@@ -237,11 +496,9 @@ def get_profile(user_id: int, db: Session = Depends(get_db)):
             data = item[1]
             avg = data["total_score"] / data["count"] if data["count"] > 0 else 0
             return (data["count"], avg)
-        # Ordena para achar o gênero com mais reviews/melhor média
         sorted_genres = sorted(genre_map.items(), key=get_sort_key, reverse=True)
         favorite_genre = sorted_genres[0][0]
 
-    # Cálculo da Média Geral Real (Baseada em TODOS os jogos)
     global_average = total_score_sum / review_count if review_count > 0 else 0.0
 
     attributes = ["jogabilidade", "graficos", "narrativa", "audio", "desempenho"]
@@ -278,7 +535,6 @@ def get_profile(user_id: int, db: Session = Depends(get_db)):
         "veteran": user.level >= 5
     }
 
-    # Pega apenas os top 3 para exibir nos destaques, mas a média geral já foi calculada com todos
     top_reviews = sorted(all_reviews, key=lambda x: x.nota_geral, reverse=True)[:3]
     top_reviews_data = []
     for r in top_reviews:
@@ -304,7 +560,7 @@ def get_profile(user_id: int, db: Session = Depends(get_db)):
         "stats": { 
             "reviews_count": review_count,
             "favorite_genre": favorite_genre,
-            "average_score": global_average # Nova propriedade com a média de TODOS os jogos
+            "average_score": global_average
         },
         "social": { "steam": user.steam_url, "xbox": user.xbox_url, "psn": user.psn_url, "epic": user.epic_url },
         "best_by_attribute": best_by_attribute,
@@ -536,60 +792,10 @@ def post_review(review_input: ReviewInput, db: Session = Depends(get_db)):
         print(f"Erro ao salvar review: {e}") 
         return {"error": str(e)}
 
-def get_api_key(): return os.environ.get('GIANTBOMB_API_KEY') or ""
-SEARCH_CACHE = {}
-BACKUP_GAMES_DATA = {
-    "Elden Ring": [{"id": 84605, "name": "Elden Ring", "image": {"thumb_url": "https://www.giantbomb.com/a/uploads/scale_avatar/16/164924/3453743-eldenring_cover.jpg", "medium_url": "https://www.giantbomb.com/a/uploads/scale_medium/16/164924/3453743-eldenring_cover.jpg"}}],
-    "Red Dead Redemption 2": [{"id": 56436, "name": "Red Dead Redemption 2", "image": {"thumb_url": "https://www.giantbomb.com/a/uploads/scale_avatar/31/316598/3060599-rdr2_cover_art.jpg", "medium_url": "https://www.giantbomb.com/a/uploads/scale_medium/31/316598/3060599-rdr2_cover_art.jpg"}}],
-    "The Legend of Zelda: Breath of the Wild": [{"id": 46567, "name": "The Legend of Zelda: Breath of the Wild", "image": {"thumb_url": "https://www.giantbomb.com/a/uploads/scale_avatar/25/250426/2914622-breathofthewild.jpg", "medium_url": "https://www.giantbomb.com/a/uploads/scale_medium/25/250426/2914622-breathofthewild.jpg"}}],
-    "Minecraft": [{"id": 30475, "name": "Minecraft", "image": {"thumb_url": "https://www.giantbomb.com/a/uploads/scale_avatar/8/87790/2469736-minecraft_cover.png", "medium_url": "https://www.giantbomb.com/a/uploads/scale_medium/8/87790/2469736-minecraft_cover.png"}}],
-    "The Last of Us Part II": [{"id": 56814, "name": "The Last of Us Part II", "image": {"thumb_url": "https://www.giantbomb.com/a/uploads/scale_avatar/29/299021/3181980-7840719750-cover.jpg", "medium_url": "https://www.giantbomb.com/a/uploads/scale_medium/29/299021/3181980-7840719750-cover.jpg"}}],
-    "Sekiro: Shadows Die Twice": [{"id": 66425, "name": "Sekiro: Shadows Die Twice", "image": {"thumb_url": "https://www.giantbomb.com/a/uploads/scale_avatar/8/82063/3075530-sekiroshadowsdietwice.jpg", "medium_url": "https://www.giantbomb.com/a/uploads/scale_medium/8/82063/3075530-sekiroshadowsdietwice.jpg"}}],
-    "Grand Theft Auto V": [{"id": 36992, "name": "Grand Theft Auto V", "image": {"thumb_url": "https://www.giantbomb.com/a/uploads/scale_avatar/3/34651/2462051-5283156604-Grand.jpg", "medium_url": "https://www.giantbomb.com/a/uploads/scale_medium/3/34651/2462051-5283156604-Grand.jpg"}}],
-    "Hollow Knight: Silksong": [{"id": 72016, "name": "Hollow Knight: Silksong", "image": {"thumb_url": "https://www.giantbomb.com/a/uploads/scale_avatar/15/151939/3087118-hkss.jpg", "medium_url": "https://www.giantbomb.com/a/uploads/scale_medium/15/151939/3087118-hkss.jpg"}}]
-}
-
-@app.get("/api/search")
-def search_games(q: str = None, api_key: str = Depends(get_api_key)):
-    if not q: return []
-    if q in SEARCH_CACHE: return SEARCH_CACHE[q]
-    url = "https://www.giantbomb.com/api/search/"
-    headers = {'User-Agent': 'GameGScore-App-V1'}
-    params = {'api_key': api_key, 'format': 'json', 'query': q, 'resources': 'game', 'limit': 10, 'field_list': 'id,name,image'}
-    for attempt in range(2): 
-        try:
-            r = requests.get(url, params=params, headers=headers)
-            if r.status_code == 200:
-                data = r.json()
-                if data.get('status_code') == 107: break 
-                if data.get('status_code') == 1: 
-                     results = data.get('results', [])
-                     SEARCH_CACHE[q] = results
-                     return results
-            if r.status_code == 420: break
-            time.sleep(1)
-        except: time.sleep(1)
-    if q in BACKUP_GAMES_DATA: return BACKUP_GAMES_DATA[q]
-    return [] 
-
-@app.get("/api/game/{game_id}")
-def get_game(game_id: str, api_key: str = Depends(get_api_key)):
-    game_id_int = int(game_id)
-    for name, games in BACKUP_GAMES_DATA.items():
-        if games[0]['id'] == game_id_int:
-            games[0]['genres'] = [{'name': 'Action'}]
-            return games[0]
-    try:
-        r = requests.get(f"https://www.giantbomb.com/api/game/3030-{game_id}/", params={'api_key': api_key, 'format': 'json', 'field_list': 'id,name,deck,image,genres'}, headers={'User-Agent': 'MeuApp'})
-        return r.json().get('results', {})
-    except: return {}
-
 @app.get("/api/review")
 def get_review(game_id: int, owner_id: int, db: Session = Depends(get_db)):
     r = db.query(Review).filter(Review.game_id == game_id, Review.owner_id == owner_id).first()
     return r if r else {"error": "Não encontrada"}
-
-# --- ROTAS DE COMENTÁRIOS ---
 
 @app.post("/api/comments")
 def post_comment(comment: CommentInput, db: Session = Depends(get_db)):
@@ -608,31 +814,21 @@ def post_comment(comment: CommentInput, db: Session = Depends(get_db)):
 
 @app.get("/api/game/{game_id}/discussion")
 def get_game_discussion(game_id: int, user_id: int = -1, db: Session = Depends(get_db)):
-    # Retorna contagem e o TOP comentário
     total_count = db.query(Comment).filter(Comment.game_id == game_id).count()
-    
-    # Busca o comentário com mais likes (subquery para contar likes)
     stmt = db.query(Comment, func.count(CommentLike.id).label('likes'))\
         .outerjoin(CommentLike)\
         .filter(Comment.game_id == game_id)\
         .group_by(Comment.id)\
         .order_by(desc('likes'), desc(Comment.created_at))\
         .first()
-        
     if not stmt:
         return {"total": 0, "top_comment": None}
-        
     comment, likes_count = stmt
-    
-    # Verifica se o usuário atual deu like
     user_liked = False
     if user_id != -1:
         if db.query(CommentLike).filter(CommentLike.user_id == user_id, CommentLike.comment_id == comment.id).first():
             user_liked = True
-            
-    # Pega info do autor
     author = db.query(User).filter(User.id == comment.user_id).first()
-    
     return {
         "total": total_count,
         "top_comment": {
@@ -658,16 +854,13 @@ def get_all_game_comments(game_id: int, user_id: int = -1, db: Session = Depends
         .group_by(Comment.id)\
         .order_by(desc('likes'), desc(Comment.created_at))\
         .all()
-        
     result = []
     for c, likes in comments:
         user_liked = False
         if user_id != -1:
             if db.query(CommentLike).filter(CommentLike.user_id == user_id, CommentLike.comment_id == c.id).first():
                 user_liked = True
-        
         author = db.query(User).filter(User.id == c.user_id).first()
-        
         result.append({
             "id": c.id,
             "content": c.content,
@@ -696,23 +889,18 @@ def toggle_like(comment_id: int, like_data: LikeInput, db: Session = Depends(get
         db.commit()
         return {"status": "liked"}
 
-# --- ROTA NOVA PARA COMENTÁRIOS DO USUÁRIO ---
 @app.get("/api/user/{user_id}/comments")
 def get_user_comments(user_id: int, db: Session = Depends(get_db)):
-    # Busca comentários do usuário + contagem de likes
     comments = db.query(Comment, func.count(CommentLike.id).label('likes'))\
         .outerjoin(CommentLike)\
         .filter(Comment.user_id == user_id)\
         .group_by(Comment.id)\
         .order_by(desc(Comment.created_at))\
         .all()
-
     results = []
     for c, likes in comments:
-        # Tenta descobrir o nome do jogo
         review = db.query(Review).filter(Review.game_id == c.game_id).first()
         game_name = review.game_name if review else f"Jogo #{c.game_id}"
-        
         results.append({
             "id": c.id,
             "content": c.content,
@@ -725,22 +913,17 @@ def get_user_comments(user_id: int, db: Session = Depends(get_db)):
 
 @app.get("/api/user/{user_id}/best_comment")
 def get_user_best_comment(user_id: int, db: Session = Depends(get_db)):
-    # Pega o comentário mais curtido do usuário
     stmt = db.query(Comment, func.count(CommentLike.id).label('likes'))\
         .outerjoin(CommentLike)\
         .filter(Comment.user_id == user_id)\
         .group_by(Comment.id)\
         .order_by(desc('likes'))\
         .first()
-        
     if not stmt: return None
-    
     comment, likes = stmt
-    
     game_name = "Jogo Desconhecido"
     review = db.query(Review).filter(Review.game_id == comment.game_id).first()
     if review: game_name = review.game_name
-    
     return {
         "id": comment.id,
         "content": comment.content,
