@@ -49,7 +49,7 @@ const Index = () => {
     };
 
     fetchUserData();
-    loadBestRatedGames(); // Mudamos o nome da função aqui
+    loadBestRatedGames(); 
   }, []);
 
   // --- NOVA FUNÇÃO DE BUSCA ---
@@ -58,7 +58,6 @@ const Index = () => {
     setIsSearching(false);
 
     try {
-      // Chama a nova rota que criamos no Python
       const response = await fetch("/api/games/best-rated");
       if (response.ok) {
         const data = await response.json();
@@ -94,7 +93,7 @@ const Index = () => {
     e.preventDefault();
     if (query.trim() === "") {
       setGames([]); 
-      loadBestRatedGames(); // Volta para os melhores avaliados se limpar a busca
+      loadBestRatedGames(); 
     } else {
       searchGames(query);
     }
@@ -128,6 +127,7 @@ const Index = () => {
             xp={userProfile?.xp || 0}
             avatarUrl={userProfile?.avatar_url || ""} 
             bannerUrl={userProfile?.banner_url}
+            bio={userProfile?.bio} // Passando a bio aqui também
           />
 
           <div className="flex flex-col md:flex-row items-center justify-between gap-4">
