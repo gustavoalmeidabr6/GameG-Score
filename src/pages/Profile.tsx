@@ -5,7 +5,7 @@ import {
   Trophy, Medal, Zap, Crown, Flame, Link as LinkIcon, Frown, 
   Gamepad2, List, Trash2, MessageSquare, Heart, Quote,
   Shield, Eye, Headphones, Book, Cpu, Sword, Map, Scale, AlertTriangle,
-  Loader2, HelpCircle, Save, CheckCircle2, XCircle
+  Loader2, HelpCircle, Save, CheckCircle2, XCircle, BrainCircuit
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { RadarChart } from "@/components/RadarChart";
@@ -20,7 +20,18 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Progress } from "@/components/ui/progress";
 
+// Logos
 import steamLogo from "@/assets/steam.png";
+import xboxLogo from "@/assets/xbox.png";
+import psnLogo from "@/assets/psn.png";
+import epicLogo from "@/assets/epic.png";
+
+const PLATFORMS = [
+  { name: "Xbox", key: "xbox", icon: <img src={xboxLogo} alt="Xbox" className="w-6 h-6 object-contain" /> },
+  { name: "Steam", key: "steam", icon: <img src={steamLogo} alt="Steam" className="w-6 h-6 object-contain" /> },
+  { name: "Epic Games", key: "epic", icon: <img src={epicLogo} alt="Epic" className="w-6 h-6 object-contain" /> },
+  { name: "PSN", key: "psn", icon: <img src={psnLogo} alt="PSN" className="w-6 h-6 object-contain" /> },
+];
 
 export default function Profile() {
   const navigate = useNavigate();
@@ -36,7 +47,6 @@ export default function Profile() {
   
   // Steam Data
   const [steamLibrary, setSteamLibrary] = useState<any>(null);
-  const [loadingSteam, setLoadingSteam] = useState(false); // Estado de carregamento específico
 
   // Quiz Data e Estados
   const [quizQuestions, setQuizQuestions] = useState<any[]>([]);
@@ -56,6 +66,9 @@ export default function Profile() {
   const [favoritesDialogOpen, setFavoritesDialogOpen] = useState(false);
   const [selectedFavorites, setSelectedFavorites] = useState<number[]>([]);
   const [isOwner, setIsOwner] = useState(false); 
+
+  // Tab State
+  const [activeTab, setActiveTab] = useState("overview");
 
   const fetchProfile = async () => {
     const loggedUserId = localStorage.getItem("userId");
@@ -105,20 +118,12 @@ export default function Profile() {
       if (bestCommentRes.ok) setBestComment(await bestCommentRes.json());
       if (allCommentsRes.ok) setUserComments(await allCommentsRes.json());
 
-      // 3. FETCH STEAM
+      // 3. FETCH STEAM (Visualização apenas)
       if (profile?.social?.steam) {
-          setLoadingSteam(true);
           fetch(`/api/steam/library?steam_id=${profile.social.steam}`)
             .then(res => res.json())
-            .then(data => {
-                if (data.profile) setSteamLibrary(data);
-                else setSteamLibrary(null); // Erro ou perfil privado
-            })
-            .catch(err => {
-                console.error("Erro Steam:", err);
-                setSteamLibrary(null);
-            })
-            .finally(() => setLoadingSteam(false));
+            .then(data => setSteamLibrary(data))
+            .catch(err => console.error("Erro Steam:", err));
       }
 
       // 4. FETCH QUIZ
@@ -141,12 +146,6 @@ export default function Profile() {
   useEffect(() => {
     fetchProfile();
   }, [navigate, userId]); 
-
-  const handleSteamLogin = () => {
-    const currentUrl = window.location.origin; 
-    const loggedUserId = localStorage.getItem("userId");
-    window.location.href = `/api/auth/steam/login?user_id=${loggedUserId}&redirect_url=${currentUrl}/profile/${loggedUserId}`;
-  };
 
   const handleSaveFavorites = async () => {
     if (selectedFavorites.length > 3) {
@@ -189,10 +188,12 @@ export default function Profile() {
           } else {
               setQuizFinished(true);
           }
-      }, 1500);
+      }, 1200); 
   };
 
   const getQuizResultData = () => {
+      if (quizQuestions.length === 0) return { percentage: 0, message: "", color: "" };
+      
       const percentage = Math.round((quizScore / quizQuestions.length) * 100);
       let message = "";
       let color = "";
@@ -218,6 +219,11 @@ export default function Profile() {
         toast.error(err.detail || "Erro ao excluir");
       }
     } catch (e) { toast.error("Erro de conexão"); }
+  };
+
+  const openLink = (url: string) => {
+    if (url) window.open(url, "_blank");
+    else if (isOwner) setEditDialogOpen(true);
   };
 
   if (loadingProfile || !profile) {
@@ -290,6 +296,7 @@ export default function Profile() {
 
         <div className="max-w-7xl mx-auto space-y-6">
           
+          {/* PROFILE HEADER AGORA RECEBE A BIO */}
           <ProfileHeader 
              username={profile.nickname || profile.username} 
              level={profile.level}
@@ -297,26 +304,18 @@ export default function Profile() {
              avatarUrl={profile.avatar_url}
              bannerUrl={profile.banner_url}
              xp={profile.xp}
+             bio={profile.bio || "Insira sua bio"} 
           />
 
-           <div className="text-center -mt-12 mb-4 relative z-10 flex flex-col items-center gap-2">
-              {profile.nickname && profile.nickname !== profile.username && (
-                <span className="text-xs text-gray-500 font-mono bg-black/40 px-2 py-1 rounded">@{profile.username}</span>
-              )}
-              <p className="text-gray-300 text-sm max-w-lg mx-auto bg-black/60 backdrop-blur-sm py-2 px-6 rounded-full border border-primary/30 italic shadow-lg">
-                "{profile.bio || "Insira sua bio"}"
-              </p>
-           </div>
-
           {/* ÁREA DE ABAS */}
-          <Tabs defaultValue="overview" className="w-full">
+          <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
             <div className="flex justify-center mb-8">
               <TabsList className="bg-black/60 border border-primary/20 p-1 grid grid-cols-5 w-full max-w-4xl h-auto">
                 <TabsTrigger value="overview" className="data-[state=active]:bg-primary data-[state=active]:text-black text-xs md:text-sm py-2">
                    <Award className="w-4 h-4 mr-2 hidden md:inline" /> Visão Geral
                 </TabsTrigger>
                 <TabsTrigger value="steam" className="data-[state=active]:bg-primary data-[state=active]:text-black text-xs md:text-sm py-2">
-                   <img src={steamLogo} className="w-4 h-4 mr-2 hidden md:inline opacity-80" /> Steam & Social
+                   <LinkIcon className="w-4 h-4 mr-2 hidden md:inline" /> Redes & Steam
                 </TabsTrigger>
                 <TabsTrigger value="library" className="data-[state=active]:bg-primary data-[state=active]:text-black text-xs md:text-sm py-2">
                    <Gamepad2 className="w-4 h-4 mr-2 hidden md:inline" /> Jogos ({allGames.length})
@@ -431,6 +430,31 @@ export default function Profile() {
                     )}
                   </div>
 
+                   {/* --- BALÃO DO QUIZ (CALL TO ACTION) --- */}
+                   {quizQuestions.length > 0 && (
+                      <div className="w-full cursor-pointer" onClick={() => setActiveTab("quiz")}>
+                          <div className="group relative rounded-2xl overflow-hidden border-2 border-primary/30 bg-black/60 p-6 hover:border-primary transition-all duration-300">
+                             <div className="absolute inset-0 bg-gradient-to-r from-primary/10 to-transparent opacity-0 group-hover:opacity-100 transition-opacity" />
+                             <div className="flex items-center justify-between relative z-10">
+                                <div className="flex items-center gap-4">
+                                   <div className="bg-primary/20 p-3 rounded-full">
+                                      <BrainCircuit className="w-8 h-8 text-primary" />
+                                   </div>
+                                   <div>
+                                      <h3 className="text-lg font-black text-white uppercase font-pixel">
+                                         Você conhece {profile.nickname}?
+                                      </h3>
+                                      <p className="text-gray-400 text-sm">Responda o quiz gerado por IA com base no perfil!</p>
+                                   </div>
+                                </div>
+                                <Button className="bg-primary text-black font-bold hover:bg-primary/80">
+                                   Jogar Agora
+                                </Button>
+                             </div>
+                          </div>
+                      </div>
+                   )}
+
                   <div className="grid md:grid-cols-2 gap-6">
                     <div className="glass-panel rounded-xl border border-primary/20 p-6 bg-black/60">
                       <h2 className="text-lg font-black text-primary uppercase tracking-wider mb-4 font-pixel">Estatísticas</h2>
@@ -466,6 +490,7 @@ export default function Profile() {
                     </div>
                   </div>
 
+                  {/* MELHORES POR ATRIBUTO - AGORA NO FINAL */}
                   <div className="glass-panel rounded-2xl border-2 border-primary/30 p-8 bg-black/60">
                     <h2 className="text-2xl font-black text-primary uppercase tracking-wider font-pixel mb-8 text-center">
                       Melhores por Atributo
@@ -495,104 +520,111 @@ export default function Profile() {
               )}
             </TabsContent>
 
-            {/* CONTEÚDO: STEAM & SOCIAL */}
+            {/* CONTEÚDO: REDES & STEAM */}
             <TabsContent value="steam" className="animate-fade-in space-y-6">
-                <div className="glass-panel rounded-2xl border-2 border-[#1b2838] bg-[#171a21] p-8 min-h-[50vh]">
-                    <div className="flex items-center gap-4 border-b border-white/10 pb-6 mb-6">
-                        <img src={steamLogo} className="w-12 h-12" alt="Steam Logo" />
-                        <div>
-                            <h2 className="text-2xl font-bold text-white">Integração Steam</h2>
-                            <p className="text-gray-400 text-sm">Estatísticas oficiais da conta Steam</p>
-                        </div>
+                <div className="glass-panel rounded-2xl border-2 border-[#1b2838] bg-[#0f1114] p-8 min-h-[50vh] flex flex-col items-center justify-center">
+                    
+                    <h2 className="text-2xl font-bold text-white mb-2">Redes Conectadas</h2>
+                    <p className="text-gray-400 mb-10 text-center max-w-lg">
+                       Acesse os perfis oficiais de jogos deste usuário clicando nos cards abaixo.
+                    </p>
+
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6 w-full max-w-4xl">
+                        
+                        {/* STEAM */}
+                        {profile.social.steam ? (
+                           <a href={profile.social.steam} target="_blank" rel="noreferrer" 
+                              className="group bg-[#171a21] border border-white/10 p-6 rounded-xl flex items-center gap-4 hover:border-[#66c0f4] hover:bg-[#1b2838] transition-all cursor-pointer">
+                              <img src={steamLogo} className="w-16 h-16 opacity-80 group-hover:opacity-100 transition-opacity" />
+                              <div>
+                                 <h3 className="text-xl font-bold text-white group-hover:text-[#66c0f4]">Steam</h3>
+                                 <p className="text-sm text-gray-400 flex items-center gap-1 group-hover:text-white">
+                                    Ver Perfil <ExternalLink className="w-3 h-3" />
+                                 </p>
+                              </div>
+                           </a>
+                        ) : (
+                           <div className="bg-[#171a21]/50 border border-white/5 p-6 rounded-xl flex items-center gap-4 opacity-50 grayscale">
+                              <img src={steamLogo} className="w-16 h-16" />
+                              <div>
+                                 <h3 className="text-xl font-bold text-gray-500">Steam</h3>
+                                 <p className="text-sm text-gray-600">Não vinculado</p>
+                              </div>
+                           </div>
+                        )}
+
+                        {/* XBOX */}
+                        {profile.social.xbox ? (
+                           <a href={profile.social.xbox} target="_blank" rel="noreferrer" 
+                              className="group bg-[#107c10]/10 border border-white/10 p-6 rounded-xl flex items-center gap-4 hover:border-[#107c10] hover:bg-[#107c10]/20 transition-all cursor-pointer">
+                              <img src={xboxLogo} className="w-16 h-16 opacity-80 group-hover:opacity-100 transition-opacity" />
+                              <div>
+                                 <h3 className="text-xl font-bold text-white group-hover:text-[#107c10]">Xbox Live</h3>
+                                 <p className="text-sm text-gray-400 flex items-center gap-1 group-hover:text-white">
+                                    Ver Perfil <ExternalLink className="w-3 h-3" />
+                                 </p>
+                              </div>
+                           </a>
+                        ) : (
+                           <div className="bg-[#171a21]/50 border border-white/5 p-6 rounded-xl flex items-center gap-4 opacity-50 grayscale">
+                              <img src={xboxLogo} className="w-16 h-16" />
+                              <div>
+                                 <h3 className="text-xl font-bold text-gray-500">Xbox</h3>
+                                 <p className="text-sm text-gray-600">Não vinculado</p>
+                              </div>
+                           </div>
+                        )}
+
+                        {/* PSN */}
+                        {profile.social.psn ? (
+                           <a href={profile.social.psn} target="_blank" rel="noreferrer" 
+                              className="group bg-[#003791]/10 border border-white/10 p-6 rounded-xl flex items-center gap-4 hover:border-[#0070d1] hover:bg-[#003791]/20 transition-all cursor-pointer">
+                              <img src={psnLogo} className="w-16 h-16 opacity-80 group-hover:opacity-100 transition-opacity" />
+                              <div>
+                                 <h3 className="text-xl font-bold text-white group-hover:text-[#0070d1]">PlayStation</h3>
+                                 <p className="text-sm text-gray-400 flex items-center gap-1 group-hover:text-white">
+                                    Ver Perfil <ExternalLink className="w-3 h-3" />
+                                 </p>
+                              </div>
+                           </a>
+                        ) : (
+                           <div className="bg-[#171a21]/50 border border-white/5 p-6 rounded-xl flex items-center gap-4 opacity-50 grayscale">
+                              <img src={psnLogo} className="w-16 h-16" />
+                              <div>
+                                 <h3 className="text-xl font-bold text-gray-500">PlayStation</h3>
+                                 <p className="text-sm text-gray-600">Não vinculado</p>
+                              </div>
+                           </div>
+                        )}
+
+                        {/* EPIC */}
+                        {profile.social.epic ? (
+                           <a href={profile.social.epic} target="_blank" rel="noreferrer" 
+                              className="group bg-[#333]/30 border border-white/10 p-6 rounded-xl flex items-center gap-4 hover:border-white hover:bg-black transition-all cursor-pointer">
+                              <img src={epicLogo} className="w-16 h-16 opacity-80 group-hover:opacity-100 transition-opacity" />
+                              <div>
+                                 <h3 className="text-xl font-bold text-white">Epic Games</h3>
+                                 <p className="text-sm text-gray-400 flex items-center gap-1 group-hover:text-white">
+                                    Ver Perfil <ExternalLink className="w-3 h-3" />
+                                 </p>
+                              </div>
+                           </a>
+                        ) : (
+                           <div className="bg-[#171a21]/50 border border-white/5 p-6 rounded-xl flex items-center gap-4 opacity-50 grayscale">
+                              <img src={epicLogo} className="w-16 h-16" />
+                              <div>
+                                 <h3 className="text-xl font-bold text-gray-500">Epic Games</h3>
+                                 <p className="text-sm text-gray-600">Não vinculado</p>
+                              </div>
+                           </div>
+                        )}
+
                     </div>
-
-                    {loadingSteam ? (
-                        <div className="flex flex-col items-center justify-center py-20 text-gray-400">
-                            <Loader2 className="w-12 h-12 animate-spin mb-4 text-[#66c0f4]" />
-                            <p>Sincronizando com a Steam...</p>
-                        </div>
-                    ) : steamLibrary && steamLibrary.profile ? (
-                        <>
-                            <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
-                                <div className="bg-[#1b2838] p-6 rounded-xl border border-white/5 flex items-center gap-4">
-                                    <Avatar className="w-16 h-16 border-2 border-[#66c0f4]">
-                                        <AvatarImage src={steamLibrary.profile?.avatarfull} />
-                                        <AvatarFallback>ST</AvatarFallback>
-                                    </Avatar>
-                                    <div>
-                                        <h3 className="font-bold text-[#66c0f4] text-lg">{steamLibrary.profile?.personaname || "Usuário Steam"}</h3>
-                                        {/* Mostra o Nível da Steam se disponível */}
-                                        {steamLibrary.profile.level !== undefined && (
-                                            <span className="inline-block mt-1 bg-[#1b2838] border border-gray-600 text-white text-xs px-2 py-0.5 rounded-full">
-                                                Nível {steamLibrary.profile.level}
-                                            </span>
-                                        )}
-                                        <div className="mt-2">
-                                            <a href={steamLibrary.profile?.profileurl} target="_blank" className="text-xs text-gray-400 hover:text-white flex items-center gap-1">
-                                                Ver Perfil Steam <ExternalLink className="w-3 h-3" />
-                                            </a>
-                                        </div>
-                                    </div>
-                                </div>
-                                <div className="bg-[#1b2838] p-6 rounded-xl border border-white/5 flex flex-col justify-center items-center">
-                                    <span className="text-3xl font-bold text-white">{steamLibrary.games?.length || 0}</span>
-                                    <span className="text-xs text-gray-400 uppercase tracking-widest">Jogos na Biblioteca</span>
-                                </div>
-                                <div className="bg-[#1b2838] p-6 rounded-xl border border-white/5 flex flex-col justify-center items-center">
-                                    <span className="text-3xl font-bold text-[#66c0f4]">
-                                        {steamLibrary.games ? Math.round(steamLibrary.games.reduce((acc:any, g:any) => acc + g.playtime_forever, 0) / 60) : 0}h
-                                    </span>
-                                    <span className="text-xs text-gray-400 uppercase tracking-widest">Tempo Total de Jogo</span>
-                                </div>
-                            </div>
-
-                            <h3 className="text-xl font-bold text-white mb-4">Jogos Mais Jogados</h3>
-                            <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-4">
-                                {steamLibrary.games?.slice(0, 12).map((game: any) => (
-                                    <div key={game.id} className="group relative aspect-[2/3] rounded-lg overflow-hidden bg-black/50 border border-white/5">
-                                        <img src={game.image.medium_url} className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-500" />
-                                        <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-transparent to-transparent flex flex-col justify-end p-3">
-                                            <p className="text-xs font-bold text-white truncate">{game.name}</p>
-                                            <p className="text-[10px] text-[#66c0f4]">{Math.round(game.playtime_forever / 60)} horas</p>
-                                        </div>
-                                    </div>
-                                ))}
-                            </div>
-                        </>
-                    ) : (
-                        <div className="text-center py-20">
-                            <img src={steamLogo} className="w-20 h-20 mx-auto mb-4 opacity-20" />
-                            {profile?.social?.steam ? (
-                                <>
-                                    <h3 className="text-xl font-bold text-white mb-2">Erro ao carregar Steam</h3>
-                                    <p className="text-gray-400 mb-6 max-w-md mx-auto">
-                                        Não conseguimos buscar seus dados. Verifique se seu perfil na Steam está definido como <strong>Público</strong> nas configurações de privacidade.
-                                    </p>
-                                    <div className="flex gap-2 justify-center">
-                                        <Button onClick={() => window.open(`https://steamcommunity.com/profiles/${profile.social.steam}`, '_blank')} variant="outline" className="border-white/20 text-white">
-                                            Verificar Perfil
-                                        </Button>
-                                        {isOwner && (
-                                            <Button onClick={handleSteamLogin} className="bg-[#171a21] hover:bg-[#2a475e] text-white border border-white/20">
-                                                Tentar Novamente
-                                            </Button>
-                                        )}
-                                    </div>
-                                </>
-                            ) : (
-                                <>
-                                    <h3 className="text-xl font-bold text-white mb-2">Nenhuma conta Steam vinculada</h3>
-                                    <p className="text-gray-400 mb-6 max-w-md mx-auto">
-                                        Vincule sua conta Steam para exibir sua biblioteca, tempo de jogo e estatísticas oficiais diretamente no seu perfil GameG.
-                                    </p>
-                                    {isOwner && (
-                                        <Button onClick={handleSteamLogin} className="bg-[#171a21] hover:bg-[#2a475e] text-white border border-white/20">
-                                            Vincular Agora (Steam Login)
-                                        </Button>
-                                    )}
-                                </>
-                            )}
-                        </div>
+                    
+                    {isOwner && (
+                       <Button variant="outline" onClick={() => setEditDialogOpen(true)} className="mt-10 border-white/20 text-white hover:bg-white/10">
+                          <Edit className="w-4 h-4 mr-2" /> Gerenciar Links
+                       </Button>
                     )}
                 </div>
             </TabsContent>
@@ -665,7 +697,7 @@ export default function Profile() {
                         ) : (
                             <div className="text-center text-gray-500">
                                 <HelpCircle className="w-16 h-16 mx-auto mb-4 opacity-20" />
-                                <p>Este usuário ainda não tem jogos suficientes para gerar um quiz (Mínimo 4).</p>
+                                <p>Este usuário ainda não tem jogos suficientes para gerar um quiz (Mínimo 2).</p>
                             </div>
                         )
                     ) : (
@@ -684,9 +716,10 @@ export default function Profile() {
                                 </div>
                                 <Progress value={getQuizResultData().percentage} className="h-4 bg-gray-800" indicatorClassName={getQuizResultData().percentage >= 80 ? "bg-green-500" : "bg-primary"} />
                                 
-                                <div className="mt-6 flex justify-center items-baseline gap-2">
-                                  <span className="text-6xl font-black text-white font-pixel">{quizScore}</span>
-                                  <span className="text-xl text-gray-500 font-bold">/ {quizQuestions.length} Acertos</span>
+                                {/* NOTA 3/10 PEDIDA */}
+                                <div className="mt-6 flex flex-col justify-center items-center">
+                                  <span className="text-6xl font-black text-white font-pixel mb-2">{quizScore}/{quizQuestions.length}</span>
+                                  <span className="text-sm text-gray-500 font-bold uppercase tracking-wider">Acertos</span>
                                 </div>
                             </div>
 
