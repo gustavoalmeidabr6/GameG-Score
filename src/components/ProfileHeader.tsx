@@ -1,20 +1,21 @@
 import { Badge } from "@/components/ui/badge";
-import { Crown, Zap } from "lucide-react";
+import { Crown, Zap, Quote } from "lucide-react"; // Adicionei o ícone Quote
 import defaultBanner from "@/assets/BANNER1.png";
 import defaultAvatar from "@/assets/defaultprofile.png";
 
 interface ProfileHeaderProps {
   username: string;
   level: number;
-  rank: string; // Vamos ignorar o que vem do banco e calcular aqui
+  rank: string;
   avatarUrl: string;
   bannerUrl?: string;
   xp: number;
+  bio?: string; // Adicionado a propriedade Bio
 }
 
-export const ProfileHeader = ({ username, level, avatarUrl, bannerUrl, xp }: ProfileHeaderProps) => {
+export const ProfileHeader = ({ username, level, avatarUrl, bannerUrl, xp, bio }: ProfileHeaderProps) => {
   
-  // --- LÓGICA DE RANKS ---
+  // --- LÓGICA DE RANKS (Mantida igual) ---
   const getRankInfo = (currentXp: number) => {
     if (currentXp < 500) return { name: "FERRO", color: "text-gray-400", next: 500, prev: 0 };
     if (currentXp < 1000) return { name: "BRONZE", color: "text-amber-700", next: 1000, prev: 500 };
@@ -27,20 +28,17 @@ export const ProfileHeader = ({ username, level, avatarUrl, bannerUrl, xp }: Pro
   };
 
   const currentRank = getRankInfo(xp);
-
-  // Calcula porcentagem para o próximo rank
   const xpGainedInTier = xp - currentRank.prev;
   const xpNeededForNext = currentRank.next - currentRank.prev;
-  // Se for Safira (ultimo rank), deixa a barra cheia ou calcula pro infinito
   const percentage = currentRank.name === "SAFIRA" ? 100 : Math.min((xpGainedInTier / xpNeededForNext) * 100, 100);
   // -----------------------
   
   return (
     <div className="relative w-full mb-4">
-      {/* Wingman Layout Container */}
-      <div className="glass-panel border-2 border-primary/40 rounded-2xl shadow-[0_0_30px_hsl(var(--primary)/0.2)] overflow-hidden">
+      {/* Container Principal */}
+      <div className="glass-panel border-2 border-primary/40 rounded-2xl shadow-[0_0_30px_hsl(var(--primary)/0.2)] overflow-hidden min-h-[300px] flex flex-col justify-end">
         
-        {/* Background with subtle pattern */}
+        {/* Imagem de Fundo (Banner) */}
         <div 
           className="absolute inset-0 opacity-80"
           style={{
@@ -50,43 +48,34 @@ export const ProfileHeader = ({ username, level, avatarUrl, bannerUrl, xp }: Pro
           }}
         />
         
-        {/* Main Container */}
-        <div className="relative flex items-center justify-center gap-8 px-8 py-12 md:py-20">
-          {/* Left Wing: Username & Level */}
-          <div className="flex flex-col items-end gap-2 min-w-[180px]">
-            <span className="text-xl md:text-2xl font-black text-white drop-shadow-lg uppercase tracking-wider font-pixel text-right">
+        {/* Gradiente para escurecer o fundo e deixar o texto legível */}
+        <div className="absolute inset-0 bg-gradient-to-t from-black via-black/50 to-transparent" />
+
+        {/* Conteúdo Central */}
+        <div className="relative flex flex-col md:flex-row items-center justify-center gap-6 px-8 py-8 md:py-10 z-10">
+          
+          {/* Esquerda: Username & Level */}
+          <div className="flex flex-col items-center md:items-end gap-2 min-w-[180px]">
+            <span className="text-xl md:text-2xl font-black text-white drop-shadow-lg uppercase tracking-wider font-pixel text-center md:text-right">
               {username}
             </span>
             <Badge variant="outline" className="border-primary bg-black/60 text-primary text-xs font-pixel px-3 py-1 backdrop-blur-md shadow-lg">
               LVL {level}
             </Badge>
-            
-            <div className="flex items-center gap-1 mt-1">
-              <div className="w-16 h-px bg-gradient-to-r from-transparent to-primary/50" />
-              <div className="w-1 h-1 bg-primary/50 rounded-full" />
-            </div>
           </div>
 
-          {/* Center: Avatar (Nuclear) */}
+          {/* Centro: Avatar */}
           <div className="relative flex-shrink-0">
             <div className="absolute inset-0 rounded-full bg-primary/20 blur-2xl scale-110" />
-            
             <img
               src={avatarUrl || defaultAvatar}
               alt={username}
               className="relative w-28 h-28 md:w-32 md:h-32 rounded-full border-4 border-primary/50 ring-4 ring-primary/20 ring-offset-4 ring-offset-transparent shadow-[0_0_40px_hsl(var(--primary)/0.6)] object-cover bg-black"
             />
-            
-            {/* Tech Corner Brackets */}
-            <div className="absolute -top-2 -left-2 w-8 h-8 border-l-2 border-t-2 border-primary/60" />
-            <div className="absolute -top-2 -right-2 w-8 h-8 border-r-2 border-t-2 border-primary/60" />
-            <div className="absolute -bottom-2 -left-2 w-8 h-8 border-l-2 border-b-2 border-primary/60" />
-            <div className="absolute -bottom-2 -right-2 w-8 h-8 border-r-2 border-b-2 border-primary/60" />
           </div>
 
-          {/* Right Wing: Rank & XP */}
-          <div className="flex flex-col items-start gap-2 min-w-[180px]">
-            {/* Rank Badge (AGORA COM O RANK NOVO) */}
+          {/* Direita: Rank & XP */}
+          <div className="flex flex-col items-center md:items-start gap-2 min-w-[180px]">
             <div className="flex items-center gap-2 glass-panel px-4 py-2 rounded-lg border border-primary/30 bg-black/60 backdrop-blur-md shadow-lg">
               <Crown className={`h-5 w-5 ${currentRank.color}`} />
               <div className="flex flex-col">
@@ -96,33 +85,37 @@ export const ProfileHeader = ({ username, level, avatarUrl, bannerUrl, xp }: Pro
                 </span>
               </div>
             </div>
-
-            {/* XP Progress */}
-            <div className="flex flex-col gap-1 w-full">
-              <div className="flex items-center gap-2">
+            
+            <div className="flex flex-col gap-1 w-full max-w-[150px]">
+              <div className="flex items-center justify-between gap-2">
                 <Zap className="h-3 w-3 text-primary" />
                 <span className="text-[10px] text-white drop-shadow-md font-bold uppercase tracking-wider">
-                  {currentRank.name === "SAFIRA" 
-                    ? "Nível Máximo" 
-                    : `Próx: ${Math.floor(xpNeededForNext - xpGainedInTier)} XP`
-                  }
+                  {currentRank.name === "SAFIRA" ? "MAX" : `${Math.floor(percentage)}%`}
                 </span>
               </div>
-              {/* Barra de Progresso */}
               <div className="relative w-full h-2 glass-panel rounded-full overflow-hidden border border-primary/30 bg-black/50">
                 <div 
-                  className="absolute inset-0 bg-gradient-to-r from-primary/80 to-primary transition-all duration-500 shadow-[0_0_10px_hsl(var(--primary)/0.6)]"
+                  className="absolute inset-0 bg-gradient-to-r from-primary/80 to-primary transition-all duration-500"
                   style={{ width: `${percentage}%` }}
                 />
               </div>
             </div>
-
-            <div className="flex items-center gap-1 mt-1">
-              <div className="w-1 h-1 bg-primary/50 rounded-full" />
-              <div className="w-16 h-px bg-gradient-to-l from-transparent to-primary/50" />
-            </div>
           </div>
         </div>
+
+        {/* BIO: Agora dentro do Banner (Parte inferior) */}
+        {bio && (
+            <div className="relative z-10 w-full px-6 pb-6 pt-2 text-center">
+                 <div className="inline-block bg-black/40 backdrop-blur-md border border-white/10 rounded-xl px-6 py-3 max-w-2xl shadow-lg">
+                    <p className="text-gray-200 text-sm italic font-medium flex items-center justify-center gap-2">
+                        <Quote className="w-3 h-3 text-primary rotate-180 mb-2" />
+                        {bio}
+                        <Quote className="w-3 h-3 text-primary mt-2" />
+                    </p>
+                 </div>
+            </div>
+        )}
+
       </div>
     </div>
   );
