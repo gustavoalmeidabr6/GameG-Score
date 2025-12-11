@@ -20,7 +20,7 @@ type SteamData = {
     final_formatted: string;
     discount_percent: number;
     initial_formatted: string;
-  };
+  } | null;
   is_free: boolean;
   current_players: number;
   metacritic?: { score: number };
@@ -125,7 +125,7 @@ const GameDetails = () => {
   const [loading, setLoading] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  const icons = {
+  const icons: Record<string, JSX.Element> = {
     jogabilidade: <Gamepad2 className="w-4 h-4" />,
     graficos: <MonitorPlay className="w-4 h-4" />,
     narrativa: <Trophy className="w-4 h-4" />,
@@ -289,7 +289,6 @@ const GameDetails = () => {
     } catch (e) { console.error(e); }
   };
 
-  // Função para abrir o link da Steam Corretamente
   const openSteamLink = () => {
     if (game?.steam_data?.store_link) {
       window.open(game.steam_data.store_link, '_blank', 'noopener,noreferrer');
@@ -385,15 +384,14 @@ const GameDetails = () => {
                             <img src="/src/assets/steam.png" className="w-5 h-5 opacity-70" alt="Steam" />
                             Steam Store
                          </div>
-                         {/* Mostra jogadores se houver, ou 'Online' estático se falhar a contagem */}
                          <div className="flex items-center gap-1.5 text-[#3bbe5d] text-xs font-bold bg-[#3bbe5d]/10 px-2 py-1 rounded">
                             <span className="relative flex h-2 w-2">
                                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-[#3bbe5d] opacity-75"></span>
                                <span className="relative inline-flex rounded-full h-2 w-2 bg-[#3bbe5d]"></span>
                             </span>
                             {(game.steam_data.current_players || 0) > 0 
-                                ? `${game.steam_data.current_players.toLocaleString()} JOGANDO` 
-                                : "STATUS ONLINE"}
+                               ? `${game.steam_data.current_players.toLocaleString()} JOGANDO` 
+                               : "STATUS ONLINE"}
                          </div>
                       </div>
                       
@@ -408,20 +406,18 @@ const GameDetails = () => {
                                   </span>
                                ) : null}
                                <span className="text-2xl font-bold text-white">
-                                  {game.steam_data.price_overview?.final_formatted || "Ver na Loja"}
+                                  {game.steam_data.price_overview?.final_formatted || "Ver na Steam"}
                                </span>
                             </div>
                          )}
                       </div>
 
-                      {/* --- CORREÇÃO DO BOTÃO OCO --- */}
-                      {/* Removemos o <a> e usamos onClick direto no Button */}
                       <Button 
                         onClick={openSteamLink}
                         className="w-full bg-gradient-to-r from-[#4754a2] to-[#6a87d6] hover:from-[#5664b6] hover:to-[#7a96e3] text-white font-bold h-10 shadow-lg transition-all hover:scale-105"
                       >
-                         <ShoppingCart className="w-4 h-4 mr-2" />
-                         {game.steam_data.is_free ? "JOGAR AGORA" : "COMPRAR / BAIXAR"}
+                          <ShoppingCart className="w-4 h-4 mr-2" />
+                          {game.steam_data.is_free ? "JOGAR AGORA" : "COMPRAR / BAIXAR"}
                       </Button>
                   </div>
                )}
@@ -565,8 +561,8 @@ const GameDetails = () => {
                       <DialogContent className="bg-[#1a1c1f] border-primary/20 text-white max-w-2xl h-[80vh] flex flex-col p-0 overflow-hidden">
                           <DialogHeader className="p-6 bg-[#121214] border-b border-white/5">
                               <DialogTitle className="font-pixel text-primary flex items-center gap-2">
-                                 <MessageSquare className="w-5 h-5" /> 
-                                 Comentários: {game.name}
+                                  <MessageSquare className="w-5 h-5" /> 
+                                  Comentários: {game.name}
                               </DialogTitle>
                           </DialogHeader>
                           
@@ -575,8 +571,8 @@ const GameDetails = () => {
                                   allComments.map(comment => <CommentItem key={comment.id} comment={comment} />)
                               ) : (
                                   <div className="flex flex-col items-center justify-center py-12 text-gray-500">
-                                     <MessageSquare className="w-12 h-12 mb-2 opacity-20" />
-                                     <p>Nenhum comentário ainda.</p>
+                                      <MessageSquare className="w-12 h-12 mb-2 opacity-20" />
+                                      <p>Nenhum comentário ainda.</p>
                                   </div>
                               )}
                           </ScrollArea>
