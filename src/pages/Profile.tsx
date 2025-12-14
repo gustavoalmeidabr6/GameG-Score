@@ -5,7 +5,8 @@ import {
   Trophy, Medal, Zap, Crown, Flame, Link as LinkIcon, Frown, 
   Gamepad2, List, Trash2, MessageSquare, Heart, Quote,
   Shield, Eye, Headphones, Book, Cpu, Sword, Map, Scale, AlertTriangle,
-  Loader2, HelpCircle, Save, CheckCircle2, XCircle, BrainCircuit
+  Loader2, HelpCircle, Save, CheckCircle2, XCircle, BrainCircuit, Users,
+  Swords, MousePointerClick
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { RadarChart } from "@/components/RadarChart";
@@ -19,6 +20,7 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Progress } from "@/components/ui/progress";
+import { Slider } from "@/components/ui/slider";
 
 // Logos
 import steamLogo from "@/assets/steam.png";
@@ -26,12 +28,21 @@ import xboxLogo from "@/assets/xbox.png";
 import psnLogo from "@/assets/psn.png";
 import epicLogo from "@/assets/epic.png";
 
-const PLATFORMS = [
-  { name: "Xbox", key: "xbox", icon: <img src={xboxLogo} alt="Xbox" className="w-6 h-6 object-contain" /> },
-  { name: "Steam", key: "steam", icon: <img src={steamLogo} alt="Steam" className="w-6 h-6 object-contain" /> },
-  { name: "Epic Games", key: "epic", icon: <img src={epicLogo} alt="Epic" className="w-6 h-6 object-contain" /> },
-  { name: "PSN", key: "psn", icon: <img src={psnLogo} alt="PSN" className="w-6 h-6 object-contain" /> },
-];
+// Interfaces para o Quiz Avançado
+type QuizStage = {
+  id: number;
+  type: 'multiple_choice' | 'slider' | 'versus' | 'genre';
+  question: string;
+  // Propriedades variáveis dependendo do tipo
+  options?: any[];
+  correct_id?: number;
+  correct_answer?: string;
+  correct_score?: number;
+  game_name?: string;
+  game_image?: string;
+  option_a?: any;
+  option_b?: any;
+};
 
 export default function Profile() {
   const navigate = useNavigate();
@@ -44,19 +55,20 @@ export default function Profile() {
   const [allTierlists, setAllTierlists] = useState<any[]>([]);
   const [userComments, setUserComments] = useState<any[]>([]);
   const [bestComment, setBestComment] = useState<any>(null);
-  
-  // Steam Data
-  const [steamLibrary, setSteamLibrary] = useState<any>(null);
+  const [connections, setConnections] = useState<any[]>([]); // Novo: Conexões
 
-  // Quiz Data e Estados
-  const [quizQuestions, setQuizQuestions] = useState<any[]>([]);
+  // Quiz Data e Estados Avançados
+  const [quizQuestions, setQuizQuestions] = useState<QuizStage[]>([]); // Alterado para receber lista plana
   const [currentQuestionIndex, setCurrentQuestionIndex] = useState(0);
   const [quizScore, setQuizScore] = useState(0);
   const [quizFinished, setQuizFinished] = useState(false);
+  const [quizLoading, setQuizLoading] = useState(false);
   
-  // Novos estados para UX do Quiz
+  // Estados de Interação do Quiz
   const [answerState, setAnswerState] = useState<'idle' | 'correct' | 'incorrect'>('idle');
-  const [selectedOptionId, setSelectedOptionId] = useState<number | null>(null);
+  const [selectedOptionId, setSelectedOptionId] = useState<number | string | null>(null);
+  const [sliderValue, setSliderValue] = useState<number[]>([5.0]);
+  const [versusSelected, setVersusSelected] = useState<number | null>(null);
 
   // Estados de carregamento
   const [loadingProfile, setLoadingProfile] = useState(true);
@@ -99,17 +111,20 @@ export default function Profile() {
       // 2. BACKGROUND FETCH
       setLoadingSecondary(true);
       
-      const [gamesRes, tierRes, bestCommentRes, allCommentsRes] = await Promise.all([
+      const [gamesRes, tierRes, bestCommentRes, allCommentsRes, connRes] = await Promise.all([
         fetch(`/api/user_games/${targetId}`),
         fetch(`/api/tierlists/${targetId}`),
         fetch(`/api/user/${targetId}/best_comment`),
-        fetch(`/api/user/${targetId}/comments`)
+        fetch(`/api/user/${targetId}/comments`),
+        fetch(`/api/connections/${targetId}`) // Trazendo as conexões
       ]);
 
       if (gamesRes.ok) {
         const gamesData = await gamesRes.json();
+        // Ordenar por nota
         gamesData.sort((a: any, b: any) => (b.nota_geral || 0) - (a.nota_geral || 0));
         setAllGames(gamesData);
+        // Preencher favoritos para edição
         const favs = gamesData.filter((g: any) => g.is_favorite).map((g: any) => g.id);
         setSelectedFavorites(favs);
       }
@@ -117,22 +132,19 @@ export default function Profile() {
       if (tierRes.ok) setAllTierlists(await tierRes.json());
       if (bestCommentRes.ok) setBestComment(await bestCommentRes.json());
       if (allCommentsRes.ok) setUserComments(await allCommentsRes.json());
+      if (connRes.ok) setConnections(await connRes.json());
 
-      // 3. FETCH STEAM (Visualização apenas)
-      if (profile?.social?.steam) {
-          fetch(`/api/steam/library?steam_id=${profile.social.steam}`)
-            .then(res => res.json())
-            .then(data => setSteamLibrary(data))
-            .catch(err => console.error("Erro Steam:", err));
-      }
-
-      // 4. FETCH QUIZ
+      // 3. FETCH QUIZ AVANÇADO
+      setQuizLoading(true);
       fetch(`/api/quiz/${targetId}`)
         .then(res => res.json())
         .then(data => {
-            if (!data.error && Array.isArray(data)) setQuizQuestions(data);
+            if (!data.error && Array.isArray(data)) {
+                setQuizQuestions(data);
+            }
         })
-        .catch(err => console.error("Erro Quiz:", err));
+        .catch(err => console.error("Erro Quiz:", err))
+        .finally(() => setQuizLoading(false));
 
     } catch (error) {
       console.error(error);
@@ -167,45 +179,6 @@ export default function Profile() {
     } catch (e) { toast.error("Erro ao salvar."); }
   };
 
-  const handleQuizAnswer = (optionId: number) => {
-      if (answerState !== 'idle') return;
-
-      const currentQ = quizQuestions[currentQuestionIndex];
-      const isCorrect = optionId === currentQ.correct_id;
-      
-      setSelectedOptionId(optionId);
-      setAnswerState(isCorrect ? 'correct' : 'incorrect');
-
-      if (isCorrect) {
-          setQuizScore(prev => prev + 1);
-      }
-
-      setTimeout(() => {
-          if (currentQuestionIndex + 1 < quizQuestions.length) {
-              setCurrentQuestionIndex(prev => prev + 1);
-              setAnswerState('idle');
-              setSelectedOptionId(null);
-          } else {
-              setQuizFinished(true);
-          }
-      }, 1200); 
-  };
-
-  const getQuizResultData = () => {
-      if (quizQuestions.length === 0) return { percentage: 0, message: "", color: "" };
-      
-      const percentage = Math.round((quizScore / quizQuestions.length) * 100);
-      let message = "";
-      let color = "";
-
-      if (percentage === 100) { message = "VOCÊ SABE TUDO! 🤯"; color = "text-yellow-400"; }
-      else if (percentage >= 80) { message = "Melhores Amigos! 💖"; color = "text-green-400"; }
-      else if (percentage >= 50) { message = "Conhece bem! 👍"; color = "text-blue-400"; }
-      else { message = "Precisa stalkear mais... 🕵️"; color = "text-red-400"; }
-
-      return { percentage, message, color };
-  };
-
   const handleDeleteTierlist = async (tierlistId: number) => {
     if (!window.confirm("Tem certeza que deseja excluir esta Tierlist?")) return;
     const loggedUserId = localStorage.getItem("userId");
@@ -221,9 +194,61 @@ export default function Profile() {
     } catch (e) { toast.error("Erro de conexão"); }
   };
 
-  const openLink = (url: string) => {
-    if (url) window.open(url, "_blank");
-    else if (isOwner) setEditDialogOpen(true);
+  // --- LÓGICA DE RESPOSTA DO QUIZ (UNIFICADA) ---
+  const handleAnswer = (correct: boolean) => {
+      if (answerState !== 'idle') return;
+
+      setAnswerState(correct ? 'correct' : 'incorrect');
+      if (correct) setQuizScore(prev => prev + 1);
+
+      // Delay para próxima etapa
+      setTimeout(() => {
+          if (currentQuestionIndex + 1 < quizQuestions.length) {
+              setCurrentQuestionIndex(prev => prev + 1);
+              setAnswerState('idle');
+              setSelectedOptionId(null);
+              setVersusSelected(null);
+              setSliderValue([5.0]);
+          } else {
+              setQuizFinished(true);
+          }
+      }, 1500);
+  };
+
+  // 1. Lógica para Múltipla Escolha / Gênero
+  const handleOptionClick = (val: number | string, correctVal: number | string) => {
+      setSelectedOptionId(val);
+      handleAnswer(val === correctVal);
+  };
+
+  // 2. Lógica para Versus
+  const handleVersusClick = (id: number, correctId: number) => {
+      setVersusSelected(id);
+      handleAnswer(id === correctId);
+  };
+
+  // 3. Lógica para Slider
+  const handleSliderConfirm = (correctScore: number) => {
+      const val = sliderValue[0];
+      const diff = Math.abs(val - correctScore);
+      // Margem de erro de 0.5 é aceitável como "correto"
+      const isCorrect = diff <= 0.5;
+      handleAnswer(isCorrect);
+  };
+
+  const getQuizResultData = () => {
+      if (quizQuestions.length === 0) return { percentage: 0, message: "", color: "" };
+      
+      const percentage = Math.round((quizScore / quizQuestions.length) * 100);
+      let message = "";
+      let color = "";
+
+      if (percentage === 100) { message = "VOCÊ SABE TUDO! 🤯"; color = "text-yellow-400"; }
+      else if (percentage >= 75) { message = "Melhores Amigos! 💖"; color = "text-green-400"; }
+      else if (percentage >= 50) { message = "Conhece bem! 👍"; color = "text-blue-400"; }
+      else { message = "Precisa stalkear mais... 🕵️"; color = "text-red-400"; }
+
+      return { percentage, message, color };
   };
 
   if (loadingProfile || !profile) {
@@ -249,21 +274,15 @@ export default function Profile() {
     { key: "hater", title: "Exigente", desc: "Nota geral menor que 3", icon: <Frown className="w-6 h-6 text-[#3bbe5d]" /> },
     { key: "connected", title: "Conectado", desc: "Adicionou uma rede social", icon: <LinkIcon className="w-6 h-6 text-[#3bbe5d]" /> },
     { key: "veteran", title: "Veterano", desc: "Nível 5", icon: <Trophy className="w-6 h-6 text-[#3bbe5d]" /> },
-    { key: "review_pro", title: "Crítico de Bronze", desc: "25+ Avaliações", icon: <Shield className="w-6 h-6 text-[#cd7f32]" /> },
-    { key: "review_legend", title: "Crítico de Prata", desc: "50+ Avaliações", icon: <Shield className="w-6 h-6 text-[#c0c0c0]" /> },
     { key: "visual_master", title: "Olhos de Águia", desc: "Deu 10 em Gráficos", icon: <Eye className="w-6 h-6 text-[#3bbe5d]" /> },
     { key: "audio_master", title: "Audiófilo", desc: "Deu 10 em Áudio", icon: <Headphones className="w-6 h-6 text-[#3bbe5d]" /> },
     { key: "narrative_master", title: "Leitor Voraz", desc: "Deu 10 em Narrativa", icon: <Book className="w-6 h-6 text-[#3bbe5d]" /> },
     { key: "gameplay_master", title: "Tryhard", desc: "Deu 10 em Jogabilidade", icon: <Gamepad2 className="w-6 h-6 text-[#3bbe5d]" /> },
     { key: "performance_master", title: "60 FPS", desc: "Deu 10 em Desempenho", icon: <Cpu className="w-6 h-6 text-[#3bbe5d]" /> },
-    { key: "rpg_fan", title: "Mestre de RPG", desc: "5+ RPGs avaliados", icon: <Sword className="w-6 h-6 text-[#3bbe5d]" /> },
-    { key: "action_fan", title: "Herói de Ação", desc: "5+ Jogos de Ação", icon: <Zap className="w-6 h-6 text-[#3bbe5d]" /> },
-    { key: "adventure_fan", title: "Explorador", desc: "5+ Jogos de Aventura", icon: <Map className="w-6 h-6 text-[#3bbe5d]" /> },
     { key: "social_star", title: "Influencer", desc: "Todas redes conectadas", icon: <Trophy className="w-6 h-6 text-[#ffd700]" /> },
     { key: "elite_gamer", title: "Lenda Viva", desc: "Nível 10 alcançado", icon: <Crown className="w-6 h-6 text-[#ffd700]" /> },
     { key: "balanced", title: "Equilibrado", desc: "Deu nota exata 5.0", icon: <Scale className="w-6 h-6 text-[#3bbe5d]" /> },
     { key: "pure_love", title: "Amor Puro", desc: "Deu 10 na Nota Final", icon: <Heart className="w-6 h-6 text-[#ff0000]" /> },
-    { key: "harsh_critic", title: "Carrasco", desc: "Média geral < 6.0", icon: <AlertTriangle className="w-6 h-6 text-[#ff4500]" /> },
   ];
 
   const unlockedAchievements = ACHIEVEMENTS_LIST.filter(ach => profile.achievements && profile.achievements[ach.key]);
@@ -296,7 +315,6 @@ export default function Profile() {
 
         <div className="max-w-7xl mx-auto space-y-6">
           
-          {/* PROFILE HEADER AGORA RECEBE A BIO */}
           <ProfileHeader 
              username={profile.nickname || profile.username} 
              level={profile.level}
@@ -307,7 +325,34 @@ export default function Profile() {
              bio={profile.bio || "Insira sua bio"} 
           />
 
-          {/* ÁREA DE ABAS */}
+          {/* SEÇÃO: CÍRCULO PRÓXIMO (CONEXÕES COMPATÍVEIS) */}
+          {connections.length > 0 && (
+            <div className="mb-4 animate-fade-in">
+                <h3 className="text-xs font-bold text-gray-400 uppercase tracking-widest mb-3 flex items-center gap-2">
+                    <Users className="w-3 h-3 text-primary" /> Círculo Próximo
+                </h3>
+                <div className="flex gap-4 overflow-x-auto pb-2 scrollbar-hide">
+                    {connections.map((friend: any) => (
+                        <Link to={`/profile/${friend.id}`} key={friend.id} className="min-w-[180px] bg-black/40 border border-white/5 p-3 rounded-lg flex items-center gap-3 hover:border-primary/40 hover:bg-white/5 transition-all">
+                            <div className="relative">
+                                <Avatar className="h-10 w-10 border border-white/10">
+                                    <AvatarImage src={friend.avatar_url} />
+                                    <AvatarFallback>{friend.username[0]}</AvatarFallback>
+                                </Avatar>
+                                <div className="absolute -bottom-1 -right-1 bg-black text-[8px] px-1 rounded text-primary border border-primary/20">Lv.{friend.level}</div>
+                            </div>
+                            <div className="overflow-hidden">
+                                <p className="font-bold text-xs text-white truncate">{friend.nickname || friend.username}</p>
+                                <div className="flex items-center gap-1">
+                                    <span className="text-[10px] font-bold text-green-400">{friend.compatibility}% Match</span>
+                                </div>
+                            </div>
+                        </Link>
+                    ))}
+                </div>
+            </div>
+          )}
+
           <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
             <div className="flex justify-center mb-8">
               <TabsList className="bg-black/60 border border-primary/20 p-1 grid grid-cols-5 w-full max-w-4xl h-auto">
@@ -315,25 +360,22 @@ export default function Profile() {
                    <Award className="w-4 h-4 mr-2 hidden md:inline" /> Visão Geral
                 </TabsTrigger>
                 <TabsTrigger value="steam" className="data-[state=active]:bg-primary data-[state=active]:text-black text-xs md:text-sm py-2">
-                   <LinkIcon className="w-4 h-4 mr-2 hidden md:inline" /> Redes & Steam
+                   <LinkIcon className="w-4 h-4 mr-2 hidden md:inline" /> Redes
                 </TabsTrigger>
                 <TabsTrigger value="library" className="data-[state=active]:bg-primary data-[state=active]:text-black text-xs md:text-sm py-2">
                    <Gamepad2 className="w-4 h-4 mr-2 hidden md:inline" /> Jogos ({allGames.length})
                 </TabsTrigger>
-                
                 <TabsTrigger value="quiz" className="data-[state=active]:bg-primary data-[state=active]:text-black text-xs md:text-sm py-2">
-                    <HelpCircle className="w-4 h-4 mr-2 hidden md:inline" /> Quiz
+                    <BrainCircuit className="w-4 h-4 mr-2 hidden md:inline" /> Quiz
                 </TabsTrigger>
-                
                 <TabsTrigger value="tierlists" className="data-[state=active]:bg-primary data-[state=active]:text-black text-xs md:text-sm py-2">
                    <List className="w-4 h-4 mr-2 hidden md:inline" /> Tierlists ({allTierlists.length})
                 </TabsTrigger>
               </TabsList>
             </div>
 
-            {/* CONTEÚDO: VISÃO GERAL */}
+            {/* --- VISÃO GERAL --- */}
             <TabsContent value="overview" className="space-y-6 animate-fade-in">
-              
               {loadingSecondary ? (
                  <div className="flex justify-center py-10"><Loader2 className="w-8 h-8 text-primary animate-spin" /></div>
               ) : (
@@ -366,7 +408,7 @@ export default function Profile() {
                                 <Dialog open={favoritesDialogOpen} onOpenChange={setFavoritesDialogOpen}>
                                     <DialogTrigger asChild>
                                         <Button size="sm" variant="outline" className="border-primary text-primary hover:bg-primary/20">
-                                            <Edit className="w-4 h-4 mr-2" /> Editar Top 3
+                                            <Edit className="w-4 h-4 mr-2" /> Editar
                                         </Button>
                                     </DialogTrigger>
                                     <DialogContent className="bg-[#1a1c1f] border-primary/20 text-white max-w-lg">
@@ -390,7 +432,7 @@ export default function Profile() {
                                                             }}
                                                             className="border-primary data-[state=checked]:bg-primary data-[state=checked]:text-black"
                                                         />
-                                                        <label htmlFor={`game-${game.id}`} className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70 flex-1 cursor-pointer">
+                                                        <label htmlFor={`game-${game.id}`} className="text-sm font-medium leading-none flex-1 cursor-pointer">
                                                             {game.title}
                                                         </label>
                                                         <span className="text-xs text-gray-500 font-mono">{game.nota_geral.toFixed(1)}</span>
@@ -430,7 +472,7 @@ export default function Profile() {
                     )}
                   </div>
 
-                   {/* --- BALÃO DO QUIZ (CALL TO ACTION) --- */}
+                   {/* CALL TO ACTION QUIZ */}
                    {quizQuestions.length > 0 && (
                       <div className="w-full cursor-pointer" onClick={() => setActiveTab("quiz")}>
                           <div className="group relative rounded-2xl overflow-hidden border-2 border-primary/30 bg-black/60 p-6 hover:border-primary transition-all duration-300">
@@ -442,13 +484,13 @@ export default function Profile() {
                                    </div>
                                    <div>
                                       <h3 className="text-lg font-black text-white uppercase font-pixel">
-                                         Você conhece {profile.nickname}?
+                                          Você conhece {profile.nickname}?
                                       </h3>
-                                      <p className="text-gray-400 text-sm">Responda o quiz gerado por IA com base no perfil!</p>
+                                      <p className="text-gray-400 text-sm">Responda 10 perguntas geradas por IA sobre este perfil!</p>
                                    </div>
                                 </div>
                                 <Button className="bg-primary text-black font-bold hover:bg-primary/80">
-                                   Jogar Agora
+                                    Jogar Agora
                                 </Button>
                              </div>
                           </div>
@@ -487,10 +529,21 @@ export default function Profile() {
                        <div className="w-full bg-gray-800 h-2 rounded-full overflow-hidden">
                           <div className="bg-primary h-full transition-all duration-1000" style={{ width: `${(unlockedAchievements.length / ACHIEVEMENTS_LIST.length) * 100}%` }} />
                        </div>
+                       <div className="mt-4 flex flex-wrap justify-center gap-2">
+                          {unlockedAchievements.slice(0, 5).map(ach => (
+                             <div key={ach.key} title={ach.title} className="bg-white/5 p-2 rounded-lg border border-white/10 hover:border-primary/50 transition-colors">
+                                {ach.icon}
+                             </div>
+                          ))}
+                          {unlockedAchievements.length > 5 && (
+                             <div className="bg-white/5 p-2 rounded-lg border border-white/10 text-xs flex items-center justify-center font-bold text-gray-500">
+                                +{unlockedAchievements.length - 5}
+                             </div>
+                          )}
+                       </div>
                     </div>
                   </div>
 
-                  {/* MELHORES POR ATRIBUTO - AGORA NO FINAL */}
                   <div className="glass-panel rounded-2xl border-2 border-primary/30 p-8 bg-black/60">
                     <h2 className="text-2xl font-black text-primary uppercase tracking-wider font-pixel mb-8 text-center">
                       Melhores por Atributo
@@ -520,10 +573,9 @@ export default function Profile() {
               )}
             </TabsContent>
 
-            {/* CONTEÚDO: REDES & STEAM */}
+            {/* --- REDES & STEAM --- */}
             <TabsContent value="steam" className="animate-fade-in space-y-6">
                 <div className="glass-panel rounded-2xl border-2 border-[#1b2838] bg-[#0f1114] p-8 min-h-[50vh] flex flex-col items-center justify-center">
-                    
                     <h2 className="text-2xl font-bold text-white mb-2">Redes Conectadas</h2>
                     <p className="text-gray-400 mb-10 text-center max-w-lg">
                        Acesse os perfis oficiais de jogos deste usuário clicando nos cards abaixo.
@@ -622,76 +674,160 @@ export default function Profile() {
                     </div>
                     
                     {isOwner && (
-                       <Button variant="outline" onClick={() => setEditDialogOpen(true)} className="mt-10 border-white/20 text-white hover:bg-white/10">
-                          <Edit className="w-4 h-4 mr-2" /> Gerenciar Links
-                       </Button>
+                        <Button variant="outline" onClick={() => setEditDialogOpen(true)} className="mt-10 border-white/20 text-white hover:bg-white/10">
+                           <Edit className="w-4 h-4 mr-2" /> Gerenciar Links
+                        </Button>
                     )}
                 </div>
             </TabsContent>
 
-            {/* CONTEÚDO: QUIZ */}
+            {/* --- QUIZ (10 PERGUNTAS) --- */}
             <TabsContent value="quiz" className="animate-fade-in">
                 <div className="glass-panel rounded-2xl border-2 border-primary/30 p-8 bg-black/60 min-h-[50vh] flex flex-col items-center justify-center">
                     {!quizFinished ? (
                         quizQuestions.length > 0 ? (
                             <div className="w-full max-w-2xl text-center">
                                 <div className="mb-8">
-                                    <span className="text-primary font-pixel text-sm uppercase tracking-widest mb-2 block">
-                                      O quanto você sabe sobre {profile.nickname || profile.username}?
-                                    </span>
-                                    <h2 className="text-2xl md:text-4xl font-bold text-white mt-2 leading-tight">
+                                    <div className="flex justify-between items-center mb-2 px-4">
+                                        <span className="text-primary font-pixel text-xs uppercase tracking-widest">
+                                          QUESTÃO {currentQuestionIndex + 1} / 10
+                                        </span>
+                                        <span className="text-white font-bold text-xs bg-primary/20 px-2 py-1 rounded">
+                                            SCORE: {quizScore}
+                                        </span>
+                                    </div>
+                                    <Progress value={((currentQuestionIndex) / 10) * 100} className="h-1 bg-gray-800" />
+                                    
+                                    <h2 className="text-2xl md:text-3xl font-bold text-white mt-8 leading-tight">
                                         {quizQuestions[currentQuestionIndex].question}
                                     </h2>
-                                    <div className="mt-4 flex justify-center gap-1">
-                                      {quizQuestions.map((_, i) => (
-                                        <div key={i} className={`h-1.5 w-8 rounded-full transition-all ${i === currentQuestionIndex ? 'bg-primary' : i < currentQuestionIndex ? 'bg-primary/50' : 'bg-gray-800'}`} />
-                                      ))}
-                                    </div>
                                 </div>
 
-                                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                    {quizQuestions[currentQuestionIndex].options.map((opt: any) => {
-                                      let btnClass = "border-white/10 bg-black/40 hover:bg-white/5";
-                                      
-                                      // Lógica de Cores
-                                      if (answerState !== 'idle') {
-                                        if (opt.id === quizQuestions[currentQuestionIndex].correct_id) {
-                                          btnClass = "border-green-500 bg-green-500/20 ring-1 ring-green-500";
-                                        } else if (opt.id === selectedOptionId) {
-                                          btnClass = "border-red-500 bg-red-500/20";
-                                        } else {
-                                          btnClass = "opacity-50 border-white/5";
-                                        }
-                                      }
+                                {/* RENDERIZAÇÃO CONDICIONAL */}
+                                <div className="mt-8">
+                                    {/* SLIDER */}
+                                    {quizQuestions[currentQuestionIndex].type === 'slider' ? (
+                                        <div className="max-w-md mx-auto bg-white/5 p-6 rounded-2xl border border-white/10">
+                                            <div className="w-32 h-44 mx-auto rounded-lg overflow-hidden border border-white/20 shadow-lg mb-6">
+                                                <img src={quizQuestions[currentQuestionIndex].game_image} className="w-full h-full object-cover" />
+                                            </div>
+                                            <div className="px-4">
+                                                <div className="flex justify-between text-xs text-gray-500 font-bold uppercase mb-2">
+                                                    <span>0.0</span>
+                                                    <span>5.0</span>
+                                                    <span>10.0</span>
+                                                </div>
+                                                <Slider
+                                                    disabled={answerState !== 'idle'}
+                                                    defaultValue={[5.0]}
+                                                    max={10}
+                                                    step={0.5}
+                                                    onValueChange={(vals) => setSliderValue(vals)}
+                                                    className="py-4 cursor-grab active:cursor-grabbing"
+                                                />
+                                                <div className="mt-4 text-center">
+                                                    <span className="text-5xl font-black font-pixel text-primary">{sliderValue[0].toFixed(1)}</span>
+                                                    <p className="text-xs text-gray-400 mt-1 uppercase">Seu Palpite</p>
+                                                </div>
+                                            </div>
+                                            {answerState === 'idle' ? (
+                                                <Button 
+                                                    onClick={() => handleSliderConfirm(quizQuestions[currentQuestionIndex].correct_score!)}
+                                                    className="w-full mt-6 bg-white text-black font-bold hover:bg-gray-200 h-12"
+                                                >
+                                                    <MousePointerClick className="w-5 h-5 mr-2" /> CONFIRMAR
+                                                </Button>
+                                            ) : (
+                                                <div className={`mt-6 p-3 rounded-lg border text-center font-bold ${answerState === 'correct' ? 'border-green-500 text-green-400 bg-green-500/10' : 'border-red-500 text-red-400 bg-red-500/10'}`}>
+                                                    Nota Real: {quizQuestions[currentQuestionIndex].correct_score}
+                                                </div>
+                                            )}
+                                        </div>
+                                    ) : quizQuestions[currentQuestionIndex].type === 'versus' ? (
+                                        // VERSUS
+                                        <div className="grid grid-cols-2 gap-4 md:gap-8">
+                                            {[quizQuestions[currentQuestionIndex].option_a, quizQuestions[currentQuestionIndex].option_b].map((opt: any) => {
+                                                const isSelected = versusSelected === opt.id;
+                                                const isCorrect = opt.id === quizQuestions[currentQuestionIndex].correct_id;
+                                                
+                                                let borderClass = "border-transparent hover:border-primary/50";
+                                                if (answerState !== 'idle') {
+                                                    if (isCorrect) borderClass = "border-green-500 ring-4 ring-green-500/20 grayscale-0";
+                                                    else if (isSelected) borderClass = "border-red-500 opacity-50 grayscale";
+                                                    else borderClass = "opacity-30 grayscale";
+                                                }
 
-                                      return (
-                                        <button 
-                                            key={opt.id}
-                                            disabled={answerState !== 'idle'}
-                                            onClick={() => handleQuizAnswer(opt.id)}
-                                            className={`group relative h-24 md:h-32 rounded-xl overflow-hidden border-2 transition-all flex items-center text-left ${btnClass}`}
-                                        >
-                                            <div className="w-24 md:w-32 h-full flex-shrink-0">
-                                                <img src={opt.image || "/placeholder.png"} className="w-full h-full object-cover" />
-                                            </div>
-                                            <div className="p-4 flex-1">
-                                                <span className={`font-bold transition-colors line-clamp-2 ${answerState !== 'idle' && opt.id === quizQuestions[currentQuestionIndex].correct_id ? 'text-green-400' : 'text-white'}`}>
-                                                  {opt.name}
-                                                </span>
-                                            </div>
-                                            {answerState !== 'idle' && opt.id === quizQuestions[currentQuestionIndex].correct_id && (
-                                              <div className="absolute right-4 top-1/2 -translate-y-1/2">
-                                                <CheckCircle2 className="w-6 h-6 text-green-500" />
-                                              </div>
-                                            )}
-                                            {answerState !== 'idle' && opt.id === selectedOptionId && opt.id !== quizQuestions[currentQuestionIndex].correct_id && (
-                                              <div className="absolute right-4 top-1/2 -translate-y-1/2">
-                                                <XCircle className="w-6 h-6 text-red-500" />
-                                              </div>
-                                            )}
-                                        </button>
-                                      );
-                                    })}
+                                                return (
+                                                    <div 
+                                                        key={opt.id}
+                                                        onClick={() => { if (answerState === 'idle') handleVersusClick(opt.id, quizQuestions[currentQuestionIndex].correct_id!); }}
+                                                        className={`relative aspect-[3/4] bg-gray-900 rounded-xl overflow-hidden cursor-pointer transition-all duration-500 border-4 transform ${isSelected ? 'scale-95' : 'hover:scale-105'} ${borderClass}`}
+                                                    >
+                                                        <img src={opt.image} className="w-full h-full object-cover" />
+                                                        <div className="absolute bottom-0 inset-x-0 p-4 bg-gradient-to-t from-black via-black/80 to-transparent">
+                                                            <p className="font-bold text-white text-center leading-tight shadow-black drop-shadow-md">{opt.name}</p>
+                                                            {answerState !== 'idle' && (
+                                                                <div className={`mt-2 text-center font-black text-xl ${isCorrect ? 'text-green-400' : 'text-red-400'}`}>
+                                                                    {opt.score.toFixed(1)}
+                                                                </div>
+                                                            )}
+                                                        </div>
+                                                        {answerState === 'idle' && (
+                                                            <div className="absolute inset-0 flex items-center justify-center opacity-0 hover:opacity-100 transition-opacity bg-black/40">
+                                                                <Swords className="w-12 h-12 text-white drop-shadow-lg" />
+                                                            </div>
+                                                        )}
+                                                    </div>
+                                                )
+                                            })}
+                                        </div>
+                                    ) : (
+                                        // MÚLTIPLA ESCOLHA & GÊNERO
+                                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                            {quizQuestions[currentQuestionIndex].options?.map((opt: any, idx: number) => {
+                                                const val = typeof opt === 'string' ? opt : opt.id;
+                                                const label = typeof opt === 'string' ? opt : opt.name;
+                                                const image = typeof opt === 'string' ? null : opt.image;
+                                                
+                                                let btnClass = "border-white/10 bg-black/40 hover:bg-white/5";
+                                                if (answerState !== 'idle') {
+                                                    const correct = quizQuestions[currentQuestionIndex].type === 'genre' 
+                                                        ? quizQuestions[currentQuestionIndex].correct_answer 
+                                                        : quizQuestions[currentQuestionIndex].correct_id;
+                                                    
+                                                    if (val === correct) btnClass = "border-green-500 bg-green-500/20 ring-1 ring-green-500";
+                                                    else if (val === selectedOptionId) btnClass = "border-red-500 bg-red-500/20 opacity-50";
+                                                    else btnClass = "opacity-30 border-white/5";
+                                                }
+
+                                                return (
+                                                    <button 
+                                                        key={idx}
+                                                        disabled={answerState !== 'idle'}
+                                                        onClick={() => {
+                                                            const correct = quizQuestions[currentQuestionIndex].type === 'genre' 
+                                                                ? quizQuestions[currentQuestionIndex].correct_answer 
+                                                                : quizQuestions[currentQuestionIndex].correct_id;
+                                                            handleOptionClick(val, correct);
+                                                        }}
+                                                        className={`group relative h-20 md:h-24 rounded-xl overflow-hidden border-2 transition-all flex items-center text-left ${btnClass}`}
+                                                    >
+                                                        {image && (
+                                                            <div className="w-20 md:w-24 h-full flex-shrink-0 border-r border-white/5">
+                                                                <img src={image} className="w-full h-full object-cover" />
+                                                            </div>
+                                                        )}
+                                                        <div className="p-4 flex-1">
+                                                            <span className="font-bold text-white group-hover:text-primary transition-colors">{label}</span>
+                                                        </div>
+                                                        {answerState !== 'idle' && val === (quizQuestions[currentQuestionIndex].type === 'genre' ? quizQuestions[currentQuestionIndex].correct_answer : quizQuestions[currentQuestionIndex].correct_id) && (
+                                                            <div className="absolute right-4 bg-green-500 rounded-full p-1"><CheckCircle2 className="w-4 h-4 text-black" /></div>
+                                                        )}
+                                                    </button>
+                                                )
+                                            })}
+                                        </div>
+                                    )}
                                 </div>
                             </div>
                         ) : (
@@ -706,20 +842,19 @@ export default function Profile() {
                             <h2 className="text-4xl font-black text-white font-pixel mb-2">QUIZ FINALIZADO!</h2>
                             
                             <div className={`text-xl font-bold mb-8 ${getQuizResultData().color}`}>
-                              {getQuizResultData().message}
+                                {getQuizResultData().message}
                             </div>
                             
                             <div className="bg-white/5 rounded-2xl p-8 border border-white/10 mb-8">
                                 <div className="flex justify-between text-sm text-gray-400 mb-2 font-bold uppercase tracking-wider">
-                                  <span>Nível de Amizade</span>
-                                  <span>{getQuizResultData().percentage}%</span>
+                                    <span>Nível de Amizade</span>
+                                    <span>{getQuizResultData().percentage}%</span>
                                 </div>
                                 <Progress value={getQuizResultData().percentage} className="h-4 bg-gray-800" indicatorClassName={getQuizResultData().percentage >= 80 ? "bg-green-500" : "bg-primary"} />
                                 
-                                {/* NOTA 3/10 PEDIDA */}
                                 <div className="mt-6 flex flex-col justify-center items-center">
-                                  <span className="text-6xl font-black text-white font-pixel mb-2">{quizScore}/{quizQuestions.length}</span>
-                                  <span className="text-sm text-gray-500 font-bold uppercase tracking-wider">Acertos</span>
+                                    <span className="text-6xl font-black text-white font-pixel mb-2">{quizScore}/10</span>
+                                    <span className="text-sm text-gray-500 font-bold uppercase tracking-wider">Acertos</span>
                                 </div>
                             </div>
 
@@ -728,6 +863,9 @@ export default function Profile() {
                                 setCurrentQuestionIndex(0);
                                 setQuizScore(0);
                                 setAnswerState('idle');
+                                setSelectedOptionId(null);
+                                setVersusSelected(null);
+                                setSliderValue([5.0]);
                             }} className="w-full bg-primary text-black hover:bg-primary/80 font-bold h-12">
                                 Tentar Novamente
                             </Button>
@@ -736,9 +874,9 @@ export default function Profile() {
                 </div>
             </TabsContent>
 
-            {/* CONTEÚDO: BIBLIOTECA (Todos os jogos) */}
+            {/* --- CONTEÚDO: BIBLIOTECA (Todos os jogos) --- */}
             <TabsContent value="library" className="animate-fade-in">
-               <div className="glass-panel rounded-2xl border-2 border-primary/30 p-8 bg-black/60 min-h-[50vh]">
+                <div className="glass-panel rounded-2xl border-2 border-primary/30 p-8 bg-black/60 min-h-[50vh]">
                   <h3 className="text-xl font-bold mb-6 flex items-center gap-2 border-b border-white/10 pb-4">
                     <span className="text-primary">🎮</span> Biblioteca de Avaliações
                   </h3>
@@ -755,18 +893,14 @@ export default function Profile() {
                               alt={game.title}
                               className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-110"
                             />
-
-                            {/* NOTA DO JOGO */}
                             <div className="absolute top-2 right-2 bg-black/80 border border-primary text-primary font-black text-xs px-2 py-1 rounded-md shadow-lg z-10">
                                {typeof game.nota_geral === 'number' ? game.nota_geral.toFixed(1) : "?"}
                             </div>
-
                             {game.is_favorite && (
                                 <div className="absolute top-2 left-2 text-yellow-400 z-10 drop-shadow-md">
                                     <Star className="w-5 h-5 fill-current" />
                                 </div>
                             )}
-
                             <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
                               <span className="text-primary font-bold text-sm border border-primary px-3 py-1 rounded-full bg-black/50 backdrop-blur-sm">Ver Detalhes</span>
                             </div>
@@ -783,12 +917,12 @@ export default function Profile() {
                        <p>Este usuário ainda não avaliou nenhum jogo.</p>
                     </div>
                   )}
-               </div>
+                </div>
             </TabsContent>
 
-            {/* CONTEÚDO: TIERLISTS */}
+            {/* --- CONTEÚDO: TIERLISTS --- */}
             <TabsContent value="tierlists" className="animate-fade-in">
-               <div className="glass-panel rounded-2xl border-2 border-primary/30 p-8 bg-black/60 min-h-[50vh]">
+                <div className="glass-panel rounded-2xl border-2 border-primary/30 p-8 bg-black/60 min-h-[50vh]">
                   <div className="flex justify-between items-center border-b border-white/10 pb-4 mb-6">
                     <h3 className="text-xl font-bold flex items-center gap-2">
                       <span className="text-primary">📊</span> Tierlists Criadas
@@ -839,7 +973,7 @@ export default function Profile() {
                        {isOwner && <Button variant="link" onClick={() => navigate("/tierlist")} className="text-primary">Criar a primeira</Button>}
                     </div>
                   )}
-               </div>
+                </div>
             </TabsContent>
 
           </Tabs>
