@@ -98,6 +98,13 @@ class CommentLike(Base):
     user_id = Column(Integer, ForeignKey("users.id"))
     comment_id = Column(Integer, ForeignKey("comments.id"))
 
+# --- NOVO MODELO: CURTIDAS DE TIERLIST ---
+class TierlistLike(Base):
+    __tablename__ = "tierlist_likes"
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"))
+    tierlist_id = Column(Integer, ForeignKey("tierlists.id"))
+
 # --- CONEXÃO COM O BANCO ---
 def get_db():
     global engine, SessionLocal
@@ -180,6 +187,10 @@ class LikeInput(BaseModel):
     user_id: int
     comment_id: int
 
+class TierlistLikeInput(BaseModel):
+    user_id: int
+    tierlist_id: int
+
 # ==============================================================================
 #  INTEGRAÇÃO IGDB
 # ==============================================================================
@@ -220,7 +231,7 @@ def format_igdb_image(url, size="t_cover_big"):
     return url.replace("t_thumb", size)
 
 # ==============================================================================
-#  INTEGRAÇÃO STEAM (APENAS DADOS DE JOGO, SEM LOGIN)
+#  INTEGRAÇÃO STEAM
 # ==============================================================================
 
 @app.get("/api/steam/library")
@@ -230,7 +241,6 @@ def get_steam_library(steam_id: str):
         raise HTTPException(status_code=500, detail="Chave da Steam não configurada.")
 
     target_id = steam_id
-    # Resolve Vanity URL se necessário
     if not steam_id.isdigit():
         try:
             resolve_url = f"http://api.steampowered.com/ISteamUser/ResolveVanityURL/v0001/?key={api_key}&vanityurl={steam_id}"
@@ -240,15 +250,23 @@ def get_steam_library(steam_id: str):
         except:
             pass 
 
-    # Buscar jogos
+    player_summary = {}
+    try:
+        summary_url = f"http://api.steampowered.com/ISteamUser/GetPlayerSummaries/v0002/?key={api_key}&steamids={target_id}"
+        summary_resp = requests.get(summary_url).json()
+        players = summary_resp.get("response", {}).get("players", [])
+        if players:
+            player_summary = players[0]
+    except: pass
+
     url = f"http://api.steampowered.com/IPlayerService/GetOwnedGames/v0001/?key={api_key}&steamid={target_id}&include_appinfo=1&include_played_free_games=1&format=json"
     
+    games_list = []
     try:
         response = requests.get(url)
         data = response.json()
         games = data.get("response", {}).get("games", [])
         
-        games_list = []
         for game in games:
             img_hash = game.get("img_icon_url")
             app_id = game.get("appid")
@@ -264,18 +282,19 @@ def get_steam_library(steam_id: str):
             })
             
         games_list.sort(key=lambda x: x['playtime_forever'], reverse=True)
-        return games_list[:50]
+    except: pass
 
-    except Exception as e:
-        return {"error": f"Erro ao buscar Steam: {str(e)}"}
+    return {
+        "profile": player_summary,
+        "games": games_list[:50]
+    }
 
 # ==============================================================================
-#  ROTA DE BUSCA (PRINCIPAL - NÃO MEXA AQUI SEM CUIDADO)
+#  ROTAS DE BUSCA E JOGO
 # ==============================================================================
 
 @app.get("/api/search")
 def search_games(q: str = None):
-    # Rota usada pela barra de pesquisa principal do site
     if not q: return []
     
     headers = get_igdb_headers()
@@ -308,17 +327,12 @@ def search_games(q: str = None):
         print(f"Erro na busca IGDB: {e}")
         return []
 
-# ==============================================================================
-#  ROTA DE DETALHES DO JOGO (IGDB + STEAM)
-# ==============================================================================
-
 @app.get("/api/game/{game_id}")
 def get_game(game_id: str, db: Session = Depends(get_db)):
     headers = get_igdb_headers()
     if not headers: return {}
 
     url = "https://api.igdb.com/v4/games"
-    
     body = f'fields name, summary, cover.url, genres.name, involved_companies.company.name, platforms.name, screenshots.url, websites.url, websites.category, external_games.category, external_games.uid; where id = {game_id};'
     
     igdb_data = {}
@@ -334,7 +348,6 @@ def get_game(game_id: str, db: Session = Depends(get_db)):
         print(f"Erro IGDB: {e}")
         return {}
 
-    # Encontrar ID Steam
     steam_app_id = None
     if "external_games" in igdb_data:
         for ext in igdb_data["external_games"]:
@@ -351,7 +364,6 @@ def get_game(game_id: str, db: Session = Depends(get_db)):
                     steam_app_id = match.group(1)
                     break
     
-    # Fallback de busca na Steam
     if not steam_app_id and igdb_data.get("name"):
         try:
             search_name = urllib.parse.quote(igdb_data["name"])
@@ -361,6 +373,7 @@ def get_game(game_id: str, db: Session = Depends(get_db)):
             if search_resp.get("total") > 0 and len(search_resp.get("items", [])) > 0:
                 potential_item = search_resp["items"][0]
                 potential_name = potential_item["name"]
+                
                 similarity = SequenceMatcher(None, igdb_data["name"].lower(), potential_name.lower()).ratio()
                 
                 is_valid = True
@@ -369,9 +382,9 @@ def get_game(game_id: str, db: Session = Depends(get_db)):
 
                 if is_valid:
                     steam_app_id = potential_item["id"]
-        except: pass
+        except Exception as e:
+            print(f"Erro na busca fallback Steam: {e}")
 
-    # Monta objeto Steam
     if steam_app_id:
         steam_data = {
             "app_id": steam_app_id,
@@ -381,6 +394,7 @@ def get_game(game_id: str, db: Session = Depends(get_db)):
             "price_overview": None,
             "header_image": None
         }
+        
         try:
             store_url = f"http://store.steampowered.com/api/appdetails?appids={steam_app_id}&cc=br&l=portuguese&filters=basic,price_overview,metacritic"
             store_resp = requests.get(store_url, headers={"User-Agent": "GameGScore/1.0"}, timeout=3).json()
@@ -392,26 +406,26 @@ def get_game(game_id: str, db: Session = Depends(get_db)):
                     steam_data["metacritic"] = s_data.get("metacritic")
                     steam_data["is_free"] = s_data.get("is_free", False)
                     steam_data["header_image"] = s_data.get("header_image")
-        except: pass
+        except Exception as e:
+            print(f"Erro Steam Store API: {e}")
 
         try:
             players_url = f"https://api.steampowered.com/ISteamUserStats/GetNumberOfCurrentPlayers/v1/?appid={steam_app_id}"
             players_resp = requests.get(players_url, headers={"User-Agent": "GameGScore/1.0"}, timeout=3).json()
             if players_resp.get("response"):
                 steam_data["current_players"] = players_resp["response"].get("player_count", 0)
-        except: pass
+        except Exception as e:
+            print(f"Erro Steam Players API: {e}")
 
-    # Stats da Comunidade
     try:
         stats = db.query(func.avg(Review.nota_geral), func.count(Review.id)).filter(Review.game_id == int(game_id)).first()
         avg_val = stats[0] if stats[0] is not None else 0
         count_val = stats[1] if stats[1] is not None else 0
         community_stats["average_score"] = float(avg_val)
         community_stats["total_reviews"] = int(count_val)
-    except:
+    except Exception as e:
         community_stats = {"average_score": 0, "total_reviews": 0}
 
-    # Imagens
     cover_med = ""
     cover_high = ""
     if "cover" in igdb_data:
@@ -438,95 +452,125 @@ def get_game(game_id: str, db: Session = Depends(get_db)):
     }
 
 # ==============================================================================
-#  ROTAS DE USUÁRIO E PERFIL (QUIZ CORRIGIDO AQUI)
+#  ROTAS DE COMUNIDADE (NOVO: COMENTÁRIOS E TIERLISTS)
 # ==============================================================================
 
-@app.post("/api/profile/favorites")
-def set_favorites(input_data: FavoritesInput, db: Session = Depends(get_db)):
-    try:
-        db.query(Review).filter(Review.owner_id == input_data.user_id).update({"is_favorite": False})
-        if input_data.game_ids:
-            db.query(Review).filter(
-                Review.owner_id == input_data.user_id, 
-                Review.game_id.in_(input_data.game_ids)
-            ).update({"is_favorite": True}, synchronize_session=False)
-        db.commit()
-        return {"message": "Favoritos atualizados!"}
-    except Exception as e:
-        db.rollback()
-        return {"error": str(e)}
-
-@app.get("/api/quiz/{user_id}")
-def generate_quiz(user_id: int, db: Session = Depends(get_db)):
-    reviews = db.query(Review).filter(Review.owner_id == user_id).all()
+@app.get("/api/community/top_comments")
+def get_top_community_comments(db: Session = Depends(get_db)):
+    # Busca os comentários com mais likes de todo o site
+    stmt = db.query(Comment, func.count(CommentLike.id).label('likes'))\
+        .outerjoin(CommentLike)\
+        .group_by(Comment.id)\
+        .order_by(desc('likes'), desc(Comment.created_at))\
+        .limit(10)\
+        .all()
     
-    # CORREÇÃO PRINCIPAL: Permite quiz com menos jogos para teste (mínimo 2)
-    # Se tiver menos de 4, repetimos opções ou usamos placeholders se necessário
-    if len(reviews) < 2:
-        return {"error": "Usuário precisa avaliar pelo menos 2 jogos para gerar um quiz."}
+    results = []
+    for comment, likes in stmt:
+        author = db.query(User).filter(User.id == comment.user_id).first()
+        # Tenta pegar o nome do jogo (precisa buscar na review ou mockar se não tiver review local)
+        game_name = "Jogo Desconhecido"
+        # Otimização: Tenta buscar uma review desse jogo para pegar o nome
+        review = db.query(Review).filter(Review.game_id == comment.game_id).first()
+        if review:
+            game_name = review.game_name
 
-    questions = []
-    
-    def create_question(category_key, category_name, reverse_sort=False, label_superlative="maior"):
-        # Ordena para achar o vencedor
-        sorted_reviews = sorted(reviews, key=lambda x: getattr(x, category_key), reverse=not reverse_sort)
-        winner = sorted_reviews[0]
-        
-        # Pega distratores (outros jogos)
-        distractors = [r for r in reviews if r.id != winner.id]
-        
-        # Se tiver menos de 3 distratores, usa todos que tem e repete se precisar (para não quebrar)
-        if len(distractors) < 3:
-            needed = 3 - len(distractors)
-            # Adiciona duplicatas dos distratores existentes apenas para preencher visualmente se for muito crítico
-            # Mas idealmente só mostramos o que tem. 
-            pass 
-        
-        random.shuffle(distractors)
-        selected_distractors = distractors[:3] # Pega até 3
-        
-        options = [winner] + selected_distractors
-        random.shuffle(options)
-
-        return {
-            "id": len(questions) + 1,
-            "question": f"Qual jogo recebeu a {label_superlative} nota em {category_name}?",
-            "correct_id": winner.game_id,
-            "options": [{"id": opt.game_id, "name": opt.game_name, "image": opt.game_image_url} for opt in options]
-        }
-
-    q_types = [
-        ("nota_geral", "Nota Geral", False, "maior"),
-        ("jogabilidade", "Jogabilidade", False, "melhor"),
-        ("graficos", "Gráficos", False, "melhor"),
-        ("narrativa", "Narrativa", False, "melhor"),
-        ("audio", "Áudio", False, "melhor"),
-        ("desempenho", "Desempenho", False, "melhor"),
-    ]
-
-    for key, name, rev, label in q_types:
-        q = create_question(key, name, rev, label)
-        if q: questions.append(q)
-
-    # Pergunta sobre favoritos
-    favorites = [r for r in reviews if r.is_favorite]
-    if favorites:
-        fav_winner = favorites[0]
-        others = [r for r in reviews if r.id != fav_winner.id]
-        random.shuffle(others)
-        opts = [fav_winner] + others[:3]
-        random.shuffle(opts)
-        
-        questions.append({
-            "id": len(questions) + 1,
-            "question": "Qual destes jogos está no TOP 3 do perfil?",
-            "correct_id": fav_winner.game_id,
-            "options": [{"id": o.game_id, "name": o.game_name, "image": o.game_image_url} for o in opts]
+        results.append({
+            "id": comment.id,
+            "content": comment.content,
+            "likes": likes,
+            "created_at": comment.created_at,
+            "game_id": comment.game_id,
+            "game_name": game_name,
+            "author": {
+                "id": author.id,
+                "username": author.username,
+                "nickname": author.nickname or author.username,
+                "avatar_url": author.avatar_url
+            }
         })
+    return results
 
-    return questions[:10]
+@app.get("/api/community/top_tierlists")
+def get_top_community_tierlists(db: Session = Depends(get_db)):
+    # Busca as tierlists com mais likes de todo o site
+    stmt = db.query(Tierlist, func.count(TierlistLike.id).label('likes'))\
+        .outerjoin(TierlistLike)\
+        .group_by(Tierlist.id)\
+        .order_by(desc('likes'), desc(Tierlist.id))\
+        .limit(10)\
+        .all()
+    
+    results = []
+    for tierlist, likes in stmt:
+        author = db.query(User).filter(User.id == tierlist.owner_id).first()
+        try:
+            loaded_data = json.loads(tierlist.data) if tierlist.data else {}
+        except:
+            loaded_data = {}
+            
+        results.append({
+            "id": tierlist.id,
+            "name": tierlist.name,
+            "likes": likes,
+            "data": loaded_data,
+            "author": {
+                "id": author.id,
+                "username": author.username,
+                "nickname": author.nickname or author.username,
+                "avatar_url": author.avatar_url
+            }
+        })
+    return results
 
-# --- DEMAIS ROTAS (Users, Profile, Auth) ---
+@app.post("/api/tierlist/{tierlist_id}/like")
+def toggle_tierlist_like(tierlist_id: int, like_data: TierlistLikeInput, db: Session = Depends(get_db)):
+    existing = db.query(TierlistLike).filter(TierlistLike.tierlist_id == tierlist_id, TierlistLike.user_id == like_data.user_id).first()
+    if existing:
+        db.delete(existing)
+        db.commit()
+        return {"status": "unliked"}
+    else:
+        new_like = TierlistLike(tierlist_id=tierlist_id, user_id=like_data.user_id)
+        db.add(new_like)
+        db.commit()
+        return {"status": "liked"}
+
+# ==============================================================================
+#  DEMAIS ROTAS (MANTIDAS)
+# ==============================================================================
+
+@app.get("/api/DANGEROUS-RESET-DB")
+def dangerous_reset_db(db: Session = Depends(get_db)):
+    try:
+        global engine
+        Base.metadata.drop_all(bind=engine)
+        Base.metadata.create_all(bind=engine)
+        return {"message": "SUCESSO: Banco resetado e tabelas atualizadas!"}
+    except Exception as e:
+        return {"error": f"FALHA ao resetar: {str(e)}"}
+
+@app.post("/api/auth/register")
+def register(user: UserCreate, db: Session = Depends(get_db)):
+    if db.query(User).filter(User.email == user.email).first():
+        raise HTTPException(status_code=400, detail="Email já cadastrado")
+    if db.query(User).filter(User.username == user.username).first():
+        raise HTTPException(status_code=400, detail="Nome de usuário já existe")
+    hashed_pw = get_password_hash(user.password)
+    new_user = User(email=user.email, username=user.username, nickname=user.username, hashed_password=hashed_pw, avatar_url="", banner_url="")
+    db.add(new_user)
+    db.commit()
+    db.refresh(new_user)
+    return {"message": "Criado!", "user_id": new_user.id, "username": new_user.username}
+
+@app.post("/api/auth/login")
+def login(user_login: UserLogin, db: Session = Depends(get_db)):
+    user = db.query(User).filter(User.email == user_login.email).first()
+    if not user:
+        raise HTTPException(status_code=400, detail="Email não encontrado")
+    if not verify_password(user_login.password, user.hashed_password):
+        raise HTTPException(status_code=400, detail="Senha incorreta")
+    return {"message": "Login OK", "user_id": user.id, "username": user.username}
 
 @app.get("/api/profile/{user_id}")
 def get_profile(user_id: int, db: Session = Depends(get_db)):
@@ -641,7 +685,6 @@ def search_users(q: Optional[str] = None, db: Session = Depends(get_db)):
         query = query.order_by(User.username.asc())
     else:
         query = query.order_by(User.username.asc())
-    
     users = query.limit(50).all()
     results = []
     for u in users:
@@ -1004,34 +1047,76 @@ def get_user_best_comment(user_id: int, db: Session = Depends(get_db)):
         "game_id": comment.game_id
     }
 
-@app.get("/api/DANGEROUS-RESET-DB")
-def dangerous_reset_db(db: Session = Depends(get_db)):
+@app.post("/api/profile/favorites")
+def set_favorites(input_data: FavoritesInput, db: Session = Depends(get_db)):
     try:
-        global engine
-        Base.metadata.drop_all(bind=engine)
-        Base.metadata.create_all(bind=engine)
-        return {"message": "SUCESSO: Banco resetado e tabelas atualizadas!"}
+        db.query(Review).filter(Review.owner_id == input_data.user_id).update({"is_favorite": False})
+        if input_data.game_ids:
+            db.query(Review).filter(
+                Review.owner_id == input_data.user_id, 
+                Review.game_id.in_(input_data.game_ids)
+            ).update({"is_favorite": True}, synchronize_session=False)
+        db.commit()
+        return {"message": "Favoritos atualizados!"}
     except Exception as e:
-        return {"error": f"FALHA ao resetar: {str(e)}"}
+        db.rollback()
+        return {"error": str(e)}
 
-@app.post("/api/auth/register")
-def register(user: UserCreate, db: Session = Depends(get_db)):
-    if db.query(User).filter(User.email == user.email).first():
-        raise HTTPException(status_code=400, detail="Email já cadastrado")
-    if db.query(User).filter(User.username == user.username).first():
-        raise HTTPException(status_code=400, detail="Nome de usuário já existe")
-    hashed_pw = get_password_hash(user.password)
-    new_user = User(email=user.email, username=user.username, nickname=user.username, hashed_password=hashed_pw, avatar_url="", banner_url="")
-    db.add(new_user)
-    db.commit()
-    db.refresh(new_user)
-    return {"message": "Criado!", "user_id": new_user.id, "username": new_user.username}
+@app.get("/api/quiz/{user_id}")
+def generate_quiz(user_id: int, db: Session = Depends(get_db)):
+    reviews = db.query(Review).filter(Review.owner_id == user_id).all()
+    
+    if len(reviews) < 2:
+        return {"error": "Usuário precisa de pelo menos 2 avaliações para gerar o quiz."}
 
-@app.post("/api/auth/login")
-def login(user_login: UserLogin, db: Session = Depends(get_db)):
-    user = db.query(User).filter(User.email == user_login.email).first()
-    if not user:
-        raise HTTPException(status_code=400, detail="Email não encontrado")
-    if not verify_password(user_login.password, user.hashed_password):
-        raise HTTPException(status_code=400, detail="Senha incorreta")
-    return {"message": "Login OK", "user_id": user.id, "username": user.username}
+    questions = []
+    
+    def create_question(category_key, category_name, reverse_sort=False, label_superlative="maior"):
+        sorted_reviews = sorted(reviews, key=lambda x: getattr(x, category_key), reverse=not reverse_sort)
+        winner = sorted_reviews[0]
+        
+        potential_distractors = [r for r in reviews if r.id != winner.id]
+        
+        if len(potential_distractors) < 1: return None 
+
+        random.shuffle(potential_distractors)
+        distractors = potential_distractors[:3]
+        
+        options = [winner] + distractors
+        random.shuffle(options)
+
+        return {
+            "id": len(questions) + 1,
+            "question": f"Qual jogo recebeu a {label_superlative} nota em {category_name}?",
+            "correct_id": winner.game_id,
+            "options": [{"id": opt.game_id, "name": opt.game_name, "image": opt.game_image_url} for opt in options]
+        }
+
+    q_types = [
+        ("nota_geral", "Nota Geral", False, "maior"),
+        ("jogabilidade", "Jogabilidade", False, "melhor"),
+        ("graficos", "Gráficos", False, "melhor"),
+        ("narrativa", "Narrativa", False, "melhor"),
+        ("audio", "Áudio", False, "melhor"),
+        ("desempenho", "Desempenho", False, "melhor"),
+    ]
+
+    for key, name, rev, label in q_types:
+        q = create_question(key, name, rev, label)
+        if q: questions.append(q)
+
+    favorites = [r for r in reviews if r.is_favorite]
+    if favorites and len(reviews) >= 4:
+        fav_winner = favorites[0]
+        others = [r for r in reviews if r.id != fav_winner.id][:3]
+        if len(others) == 3:
+            opts = [fav_winner] + others
+            random.shuffle(opts)
+            questions.append({
+                "id": len(questions) + 1,
+                "question": "Qual destes jogos está no TOP 3 do perfil?",
+                "correct_id": fav_winner.game_id,
+                "options": [{"id": o.game_id, "name": o.game_name, "image": o.game_image_url} for o in opts]
+            })
+
+    return questions[:10]
