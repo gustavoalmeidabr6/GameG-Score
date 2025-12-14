@@ -35,7 +35,7 @@ def get_password_hash(password):
     return hashed.decode('utf-8')
 
 # --- CONFIGURAÇÃO DO BANCO DE DADOS (SQLALCHEMY) ---
-from sqlalchemy import create_engine, Column, Integer, String, Float, ForeignKey, desc, Boolean, Text, or_, func
+from sqlalchemy import create_engine, Column, Integer, String, Float, ForeignKey, desc, Boolean, Text, or_, func, distinct
 from sqlalchemy.orm import sessionmaker, declarative_base, Session
 
 engine = None
@@ -98,7 +98,6 @@ class CommentLike(Base):
     user_id = Column(Integer, ForeignKey("users.id"))
     comment_id = Column(Integer, ForeignKey("comments.id"))
 
-# --- NOVO MODELO: CURTIDAS DE TIERLIST ---
 class TierlistLike(Base):
     __tablename__ = "tierlist_likes"
     id = Column(Integer, primary_key=True, index=True)
@@ -457,7 +456,6 @@ def get_game(game_id: str, db: Session = Depends(get_db)):
 
 @app.get("/api/community/top_comments")
 def get_top_community_comments(db: Session = Depends(get_db)):
-    # Busca os comentários com mais likes de todo o site
     stmt = db.query(Comment, func.count(CommentLike.id).label('likes'))\
         .outerjoin(CommentLike)\
         .group_by(Comment.id)\
@@ -468,9 +466,7 @@ def get_top_community_comments(db: Session = Depends(get_db)):
     results = []
     for comment, likes in stmt:
         author = db.query(User).filter(User.id == comment.user_id).first()
-        # Tenta pegar o nome do jogo (precisa buscar na review ou mockar se não tiver review local)
         game_name = "Jogo Desconhecido"
-        # Otimização: Tenta buscar uma review desse jogo para pegar o nome
         review = db.query(Review).filter(Review.game_id == comment.game_id).first()
         if review:
             game_name = review.game_name
@@ -493,7 +489,6 @@ def get_top_community_comments(db: Session = Depends(get_db)):
 
 @app.get("/api/community/top_tierlists")
 def get_top_community_tierlists(db: Session = Depends(get_db)):
-    # Busca as tierlists com mais likes de todo o site
     stmt = db.query(Tierlist, func.count(TierlistLike.id).label('likes'))\
         .outerjoin(TierlistLike)\
         .group_by(Tierlist.id)\
@@ -1062,6 +1057,74 @@ def set_favorites(input_data: FavoritesInput, db: Session = Depends(get_db)):
         db.rollback()
         return {"error": str(e)}
 
+# --- CONEXÕES / AMIGOS (COM CÁLCULO DE COMPATIBILIDADE) ---
+@app.get("/api/connections/{user_id}")
+def get_profile_connections(user_id: int, db: Session = Depends(get_db)):
+    # 1. Busca todas as reviews do usuário alvo
+    target_reviews = db.query(Review).filter(Review.owner_id == user_id).all()
+    
+    # Mapa: {game_id: nota_geral}
+    target_scores = {r.game_id: r.nota_geral for r in target_reviews}
+    target_game_ids = list(target_scores.keys())
+    
+    connections_list = []
+    
+    if target_game_ids:
+        # 2. Busca outras reviews DESSES MESMOS JOGOS por OUTROS usuários
+        others_reviews = db.query(Review).filter(
+            Review.game_id.in_(target_game_ids),
+            Review.owner_id != user_id
+        ).all()
+        
+        # Agrupa por usuario
+        user_scores_map = {}
+        for r in others_reviews:
+            if r.owner_id not in user_scores_map:
+                user_scores_map[r.owner_id] = []
+            user_scores_map[r.owner_id].append(r)
+            
+        # 3. Calcula compatibilidade
+        for other_id, reviews in user_scores_map.items():
+            total_similarity = 0
+            shared_count = 0
+            
+            for r in reviews:
+                if r.game_id in target_scores:
+                    my_score = target_scores[r.game_id]
+                    other_score = r.nota_geral
+                    
+                    # Diferença absoluta (0 a 10)
+                    diff = abs(my_score - other_score)
+                    
+                    # Converter diff em % de similaridade (0 diff = 100%, 10 diff = 0%)
+                    similarity = max(0, 100 - (diff * 10))
+                    
+                    total_similarity += similarity
+                    shared_count += 1
+            
+            if shared_count > 0:
+                final_compatibility = total_similarity / shared_count
+                
+                # SÓ ADICIONA SE FOR MAIOR QUE 50%
+                if final_compatibility > 50:
+                    other_user = db.query(User).filter(User.id == other_id).first()
+                    if other_user:
+                        connections_list.append({
+                            "id": other_user.id,
+                            "username": other_user.username,
+                            "nickname": other_user.nickname or other_user.username,
+                            "avatar_url": other_user.avatar_url,
+                            "level": other_user.level,
+                            "compatibility": int(final_compatibility),
+                            "interaction": f"{int(final_compatibility)}% Compatível"
+                        })
+
+    # Ordena por maior compatibilidade
+    connections_list.sort(key=lambda x: x['compatibility'], reverse=True)
+    
+    return connections_list[:10] # Retorna top 10
+
+# --- QUIZ COM 10 PERGUNTAS VARIADAS ---
 @app.get("/api/quiz/{user_id}")
 def generate_quiz(user_id: int, db: Session = Depends(get_db)):
     reviews = db.query(Review).filter(Review.owner_id == user_id).all()
@@ -1071,52 +1134,159 @@ def generate_quiz(user_id: int, db: Session = Depends(get_db)):
 
     questions = []
     
-    def create_question(category_key, category_name, reverse_sort=False, label_superlative="maior"):
-        sorted_reviews = sorted(reviews, key=lambda x: getattr(x, category_key), reverse=not reverse_sort)
-        winner = sorted_reviews[0]
-        
-        potential_distractors = [r for r in reviews if r.id != winner.id]
-        
-        if len(potential_distractors) < 1: return None 
+    # Helper para pegar distratores (opções erradas)
+    def get_distractors(exclude_id, count=3):
+        candidates = [r for r in reviews if r.id != exclude_id]
+        if len(candidates) >= count:
+            return random.sample(candidates, count)
+        return candidates
 
-        random.shuffle(potential_distractors)
-        distractors = potential_distractors[:3]
-        
-        options = [winner] + distractors
-        random.shuffle(options)
+    # 1. MELHOR NOTA GERAL
+    sorted_by_score = sorted(reviews, key=lambda x: x.nota_geral, reverse=True)
+    winner_score = sorted_by_score[0]
+    opts_score = [winner_score] + get_distractors(winner_score.id)
+    random.shuffle(opts_score)
+    questions.append({
+        "id": 1, "type": "multiple_choice",
+        "question": "Qual jogo recebeu a MAIOR Nota Geral deste perfil?",
+        "correct_id": winner_score.game_id,
+        "options": [{"id": o.game_id, "name": o.game_name, "image": o.game_image_url} for o in opts_score]
+    })
 
-        return {
-            "id": len(questions) + 1,
-            "question": f"Qual jogo recebeu a {label_superlative} nota em {category_name}?",
-            "correct_id": winner.game_id,
-            "options": [{"id": opt.game_id, "name": opt.game_name, "image": opt.game_image_url} for opt in options]
-        }
+    # 2. MELHOR GRÁFICO
+    sorted_gfx = sorted(reviews, key=lambda x: x.graficos, reverse=True)
+    winner_gfx = sorted_gfx[0]
+    opts_gfx = [winner_gfx] + get_distractors(winner_gfx.id)
+    random.shuffle(opts_gfx)
+    questions.append({
+        "id": 2, "type": "multiple_choice",
+        "question": "Qual jogo tem os Melhores Gráficos segundo o usuário?",
+        "correct_id": winner_gfx.game_id,
+        "options": [{"id": o.game_id, "name": o.game_name, "image": o.game_image_url} for o in opts_gfx]
+    })
 
-    q_types = [
-        ("nota_geral", "Nota Geral", False, "maior"),
-        ("jogabilidade", "Jogabilidade", False, "melhor"),
-        ("graficos", "Gráficos", False, "melhor"),
-        ("narrativa", "Narrativa", False, "melhor"),
-        ("audio", "Áudio", False, "melhor"),
-        ("desempenho", "Desempenho", False, "melhor"),
-    ]
+    # 3. MELHOR NARRATIVA
+    sorted_narr = sorted(reviews, key=lambda x: x.narrativa, reverse=True)
+    winner_narr = sorted_narr[0]
+    opts_narr = [winner_narr] + get_distractors(winner_narr.id)
+    random.shuffle(opts_narr)
+    questions.append({
+        "id": 3, "type": "multiple_choice",
+        "question": "Qual jogo tem a Melhor História (Narrativa)?",
+        "correct_id": winner_narr.game_id,
+        "options": [{"id": o.game_id, "name": o.game_name, "image": o.game_image_url} for o in opts_narr]
+    })
 
-    for key, name, rev, label in q_types:
-        q = create_question(key, name, rev, label)
-        if q: questions.append(q)
+    # 4. SLIDER (NOTA EXATA - Jogo Aleatório 1)
+    r_slider1 = random.choice(reviews)
+    questions.append({
+        "id": 4, "type": "slider",
+        "question": f"Qual a nota exata de {r_slider1.game_name}?",
+        "game_name": r_slider1.game_name,
+        "game_image": r_slider1.game_image_url,
+        "correct_score": r_slider1.nota_geral
+    })
 
+    # 5. VERSUS (Quem ganha?)
+    if len(reviews) >= 2:
+        r1, r2 = random.sample(reviews, 2)
+        winner_versus = r1 if r1.nota_geral > r2.nota_geral else r2 # Se empate, r2 ganha (simplificação)
+        questions.append({
+            "id": 5, "type": "versus",
+            "question": "Duelo: Qual jogo tem a nota maior?",
+            "option_a": {"id": r1.game_id, "name": r1.game_name, "image": r1.game_image_url, "score": r1.nota_geral},
+            "option_b": {"id": r2.game_id, "name": r2.game_name, "image": r2.game_image_url, "score": r2.nota_geral},
+            "correct_id": winner_versus.game_id
+        })
+
+    # 6. GÊNERO FAVORITO
+    genre_counts = {}
+    for r in reviews:
+        g = r.genre or "Outros"
+        genre_counts[g] = genre_counts.get(g, 0) + 1
+    fav_genre = sorted(genre_counts.items(), key=lambda x: x[1], reverse=True)[0][0]
+    fake_genres = ["RPG", "Shooter", "Adventure", "Indie", "Strategy", "Sports"]
+    fake_genres = [g for g in fake_genres if g != fav_genre]
+    random.shuffle(fake_genres)
+    opts_genre = [fav_genre] + fake_genres[:3]
+    random.shuffle(opts_genre)
+    
+    questions.append({
+        "id": 6, "type": "genre",
+        "question": "Qual gênero aparece mais neste perfil?",
+        "options": opts_genre,
+        "correct_answer": fav_genre
+    })
+
+    # 7. PIOR NOTA (Ou Menor)
+    sorted_worst = sorted(reviews, key=lambda x: x.nota_geral)
+    worst = sorted_worst[0]
+    opts_worst = [worst] + get_distractors(worst.id)
+    random.shuffle(opts_worst)
+    questions.append({
+        "id": 7, "type": "multiple_choice",
+        "question": "Qual destes jogos teve a MENOR nota?",
+        "correct_id": worst.game_id,
+        "options": [{"id": o.game_id, "name": o.game_name, "image": o.game_image_url} for o in opts_worst]
+    })
+
+    # 8. SLIDER (NOTA EXATA - Jogo Aleatório 2)
+    # Tenta pegar um diferente do primeiro slider
+    r_slider2 = random.choice(reviews)
+    if r_slider2.id == r_slider1.id and len(reviews) > 1:
+        for r in reviews:
+            if r.id != r_slider1.id:
+                r_slider2 = r
+                break
+                
+    questions.append({
+        "id": 8, "type": "slider",
+        "question": f"Quanto o usuário deu para {r_slider2.game_name}?",
+        "game_name": r_slider2.game_name,
+        "game_image": r_slider2.game_image_url,
+        "correct_score": r_slider2.nota_geral
+    })
+
+    # 9. MELHOR JOGABILIDADE
+    sorted_gameplay = sorted(reviews, key=lambda x: x.jogabilidade, reverse=True)
+    winner_gp = sorted_gameplay[0]
+    opts_gp = [winner_gp] + get_distractors(winner_gp.id)
+    random.shuffle(opts_gp)
+    questions.append({
+        "id": 9, "type": "multiple_choice",
+        "question": "Qual jogo tem a Melhor Jogabilidade?",
+        "correct_id": winner_gp.game_id,
+        "options": [{"id": o.game_id, "name": o.game_name, "image": o.game_image_url} for o in opts_gp]
+    })
+
+    # 10. ESTÁ NO TOP 3 (FAVORITOS)?
     favorites = [r for r in reviews if r.is_favorite]
-    if favorites and len(reviews) >= 4:
-        fav_winner = favorites[0]
-        others = [r for r in reviews if r.id != fav_winner.id][:3]
-        if len(others) == 3:
-            opts = [fav_winner] + others
-            random.shuffle(opts)
+    if favorites:
+        fav_target = random.choice(favorites)
+        # Distratores devem ser jogos que NÃO são favoritos
+        non_favs = [r for r in reviews if not r.is_favorite]
+        if len(non_favs) >= 3:
+            dist_favs = random.sample(non_favs, 3)
+            opts_fav = [fav_target] + dist_favs
+            random.shuffle(opts_fav)
             questions.append({
-                "id": len(questions) + 1,
-                "question": "Qual destes jogos está no TOP 3 do perfil?",
-                "correct_id": fav_winner.game_id,
-                "options": [{"id": o.game_id, "name": o.game_name, "image": o.game_image_url} for o in opts]
+                "id": 10, "type": "multiple_choice",
+                "question": "Qual destes jogos está nos Favoritos do perfil?",
+                "correct_id": fav_target.game_id,
+                "options": [{"id": o.game_id, "name": o.game_name, "image": o.game_image_url} for o in opts_fav]
             })
+    
+    # Se não tiver favoritos suficientes ou der erro, completa com outra pergunta de áudio
+    if len(questions) < 10:
+        sorted_audio = sorted(reviews, key=lambda x: x.audio, reverse=True)
+        winner_aud = sorted_audio[0]
+        opts_aud = [winner_aud] + get_distractors(winner_aud.id)
+        random.shuffle(opts_aud)
+        questions.append({
+            "id": 10, "type": "multiple_choice",
+            "question": "Qual jogo tem o Melhor Áudio/Trilha Sonora?",
+            "correct_id": winner_aud.game_id,
+            "options": [{"id": o.game_id, "name": o.game_name, "image": o.game_image_url} for o in opts_aud]
+        })
 
     return questions[:10]
