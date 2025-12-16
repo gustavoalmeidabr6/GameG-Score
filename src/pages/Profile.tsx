@@ -6,7 +6,7 @@ import {
   Gamepad2, List, Trash2, MessageSquare, Heart, Quote,
   Shield, Eye, Headphones, Book, Cpu, Sword, Map, Scale, AlertTriangle,
   Loader2, HelpCircle, Save, CheckCircle2, XCircle, BrainCircuit, Users,
-  Swords, MousePointerClick, UserPlus, UserCheck, UserMinus
+  Swords, MousePointerClick, UserPlus, UserCheck, UserMinus, Bell
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { RadarChart } from "@/components/RadarChart";
@@ -64,6 +64,7 @@ export default function Profile() {
   
   // STATUS DE AMIZADE: 'none' | 'pending_sent' | 'pending_received' | 'friends'
   const [friendStatus, setFriendStatus] = useState<string>("none");
+  const [pendingRequests, setPendingRequests] = useState<any[]>([]); // Lista de solicitações recebidas
 
   // Quiz Data e Estados Avançados
   const [quizQuestions, setQuizQuestions] = useState<QuizStage[]>([]);
@@ -162,7 +163,15 @@ export default function Profile() {
           }
       }
 
-      // 4. FETCH QUIZ AVANÇADO
+      // 4. FETCH PENDING REQUESTS (SE FOR O DONO)
+      if (loggedUserId && targetId === loggedUserId) {
+          const pendingRes = await fetch(`/api/user/${targetId}/pending_requests`);
+          if (pendingRes.ok) {
+              setPendingRequests(await pendingRes.json());
+          }
+      }
+
+      // 5. FETCH QUIZ AVANÇADO
       setQuizLoading(true);
       fetch(`/api/quiz/${targetId}`)
         .then(res => res.json())
@@ -217,7 +226,7 @@ export default function Profile() {
       } catch (e) { toast.error("Erro de conexão."); }
   };
 
-  // --- AÇÃO DE AMIZADE ---
+  // --- AÇÃO DE AMIZADE GERAL ---
   const handleFriendAction = async () => {
       const loggedUserId = localStorage.getItem("userId");
       if (!loggedUserId) return;
@@ -236,7 +245,7 @@ export default function Profile() {
                   toast.success("Solicitação enviada!");
               }
           } else if (friendStatus === 'pending_received') {
-              // ACEITAR SOLICITAÇÃO
+              // ACEITAR SOLICITAÇÃO (VIA BOTÃO DO HEADER)
               const res = await fetch("/api/friend/accept", {
                   method: "POST", 
                   headers: { "Content-Type": "application/json" },
@@ -257,6 +266,38 @@ export default function Profile() {
               }
           }
       } catch (e) { toast.error("Erro na ação de amizade."); }
+  };
+
+  // --- AÇÕES ESPECÍFICAS DA CAIXA DE SOLICITAÇÃO ---
+  const handleAcceptRequest = async (senderId: number) => {
+      const loggedUserId = localStorage.getItem("userId");
+      if (!loggedUserId) return;
+      try {
+          // sender_id aqui é quem mandou o pedido, target_id sou eu (quem aceita)
+          const res = await fetch("/api/friend/accept", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ sender_id: senderId, target_id: parseInt(loggedUserId) })
+          });
+          if (res.ok) {
+              toast.success("Solicitação aceita!");
+              setPendingRequests(prev => prev.filter(req => req.sender_id !== senderId));
+              fetchProfile(); // Atualiza a lista de amigos
+          }
+      } catch (e) { toast.error("Erro ao aceitar."); }
+  };
+
+  const handleDeclineRequest = async (senderId: number) => {
+      const loggedUserId = localStorage.getItem("userId");
+      if (!loggedUserId) return;
+      try {
+          // Usa rota de remove, passando quem mandou e quem recusa
+          const res = await fetch(`/api/friend/remove?sender_id=${senderId}&target_id=${loggedUserId}`, { method: "DELETE" });
+          if (res.ok) {
+              toast.success("Solicitação recusada.");
+              setPendingRequests(prev => prev.filter(req => req.sender_id !== senderId));
+          }
+      } catch (e) { toast.error("Erro ao recusar."); }
   };
 
   const handleSaveFavorites = async () => {
@@ -790,6 +831,57 @@ export default function Profile() {
                         </Button>
                     )}
                 </div>
+
+                {/* --- SEÇÃO DE SOLICITAÇÕES PENDENTES (APENAS PARA O DONO) --- */}
+                {isOwner && pendingRequests.length > 0 && (
+                    <div className="max-w-4xl mx-auto w-full animate-slide-up-fade">
+                        <div className="bg-yellow-500/5 border border-yellow-500/20 rounded-xl p-6">
+                            <h3 className="text-lg font-bold text-yellow-500 mb-4 flex items-center gap-2">
+                                <Bell className="w-5 h-5 fill-yellow-500" /> Solicitações Pendentes
+                                <span className="bg-yellow-500 text-black text-xs font-bold px-2 py-0.5 rounded-full">{pendingRequests.length}</span>
+                            </h3>
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                {pendingRequests.map((req: any) => (
+                                    <div key={req.request_id} className="bg-black/40 border border-white/10 p-4 rounded-lg flex items-center justify-between gap-4">
+                                        <div className="flex items-center gap-3 overflow-hidden">
+                                            <Link to={`/profile/${req.sender_id}`}>
+                                                <Avatar className="h-10 w-10 border border-white/10 hover:border-primary transition-colors">
+                                                    <AvatarImage src={req.avatar_url} />
+                                                    <AvatarFallback>{req.username[0]}</AvatarFallback>
+                                                </Avatar>
+                                            </Link>
+                                            <div className="flex flex-col overflow-hidden">
+                                                <Link to={`/profile/${req.sender_id}`} className="font-bold text-white text-sm hover:text-primary truncate">
+                                                    {req.nickname || req.username}
+                                                </Link>
+                                                <span className="text-xs text-gray-500">Quer ser seu amigo</span>
+                                            </div>
+                                        </div>
+                                        <div className="flex items-center gap-2">
+                                            <Button 
+                                                size="sm" 
+                                                onClick={() => handleAcceptRequest(req.sender_id)}
+                                                className="bg-green-600 hover:bg-green-700 text-white h-8 w-8 p-0 rounded-full"
+                                                title="Aceitar"
+                                            >
+                                                <CheckCircle2 className="w-4 h-4" />
+                                            </Button>
+                                            <Button 
+                                                size="sm" 
+                                                variant="outline"
+                                                onClick={() => handleDeclineRequest(req.sender_id)}
+                                                className="border-red-500/50 text-red-500 hover:bg-red-500/20 h-8 w-8 p-0 rounded-full"
+                                                title="Recusar"
+                                            >
+                                                <XCircle className="w-4 h-4" />
+                                            </Button>
+                                        </div>
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
+                    </div>
+                )}
 
                 {/* LISTA DE AMIGOS (Mútuos) */}
                 <div className="max-w-4xl mx-auto">
