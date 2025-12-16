@@ -6,7 +6,7 @@ import {
   Gamepad2, List, Trash2, MessageSquare, Heart, Quote,
   Shield, Eye, Headphones, Book, Cpu, Sword, Map, Scale, AlertTriangle,
   Loader2, HelpCircle, Save, CheckCircle2, XCircle, BrainCircuit, Users,
-  Swords, MousePointerClick
+  Swords, MousePointerClick, UserPlus, UserCheck, UserMinus
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { RadarChart } from "@/components/RadarChart";
@@ -55,10 +55,18 @@ export default function Profile() {
   const [allTierlists, setAllTierlists] = useState<any[]>([]);
   const [userComments, setUserComments] = useState<any[]>([]);
   const [bestComment, setBestComment] = useState<any>(null);
-  const [connections, setConnections] = useState<any[]>([]); // Novo: Conexões
+  const [connections, setConnections] = useState<any[]>([]); // Conexões por interação
+
+  // --- NOVOS DADOS SOCIAIS (AMIGOS/SEGUIDORES) ---
+  const [socialData, setSocialData] = useState<any>({ friends: [], followers: [], following: [] });
+  const [isFollowing, setIsFollowing] = useState(false);
+  const [followersCount, setFollowersCount] = useState(0);
+  
+  // STATUS DE AMIZADE: 'none' | 'pending_sent' | 'pending_received' | 'friends'
+  const [friendStatus, setFriendStatus] = useState<string>("none");
 
   // Quiz Data e Estados Avançados
-  const [quizQuestions, setQuizQuestions] = useState<QuizStage[]>([]); // Alterado para receber lista plana
+  const [quizQuestions, setQuizQuestions] = useState<QuizStage[]>([]);
   const [currentQuestionIndex, setCurrentQuestionIndex] = useState(0);
   const [quizScore, setQuizScore] = useState(0);
   const [quizFinished, setQuizFinished] = useState(false);
@@ -105,26 +113,26 @@ export default function Profile() {
       if (response.ok) {
         const data = await response.json();
         setProfile(data);
+        setFollowersCount(data.followers_count || 0); // Atualiza contador
         setLoadingProfile(false); 
       }
 
       // 2. BACKGROUND FETCH
       setLoadingSecondary(true);
       
-      const [gamesRes, tierRes, bestCommentRes, allCommentsRes, connRes] = await Promise.all([
+      const [gamesRes, tierRes, bestCommentRes, allCommentsRes, connRes, socialRes] = await Promise.all([
         fetch(`/api/user_games/${targetId}`),
         fetch(`/api/tierlists/${targetId}`),
         fetch(`/api/user/${targetId}/best_comment`),
         fetch(`/api/user/${targetId}/comments`),
-        fetch(`/api/connections/${targetId}`) // Trazendo as conexões
+        fetch(`/api/connections/${targetId}`),
+        fetch(`/api/user/${targetId}/social_list`) 
       ]);
 
       if (gamesRes.ok) {
         const gamesData = await gamesRes.json();
-        // Ordenar por nota
         gamesData.sort((a: any, b: any) => (b.nota_geral || 0) - (a.nota_geral || 0));
         setAllGames(gamesData);
-        // Preencher favoritos para edição
         const favs = gamesData.filter((g: any) => g.is_favorite).map((g: any) => g.id);
         setSelectedFavorites(favs);
       }
@@ -133,8 +141,28 @@ export default function Profile() {
       if (bestCommentRes.ok) setBestComment(await bestCommentRes.json());
       if (allCommentsRes.ok) setUserComments(await allCommentsRes.json());
       if (connRes.ok) setConnections(await connRes.json());
+      
+      if (socialRes.ok) {
+          const sData = await socialRes.json();
+          setSocialData(sData);
+          if (loggedUserId) {
+              const myId = parseInt(loggedUserId);
+              // Verifica SEGUIR
+              const amIFollowing = sData.followers.some((u:any) => u.id === myId);
+              setIsFollowing(amIFollowing);
+          }
+      }
 
-      // 3. FETCH QUIZ AVANÇADO
+      // 3. FETCH FRIEND STATUS
+      if (loggedUserId && targetId !== loggedUserId) {
+          const fsRes = await fetch(`/api/friend/status?sender_id=${loggedUserId}&target_id=${targetId}`);
+          if (fsRes.ok) {
+              const fsData = await fsRes.json();
+              setFriendStatus(fsData.status);
+          }
+      }
+
+      // 4. FETCH QUIZ AVANÇADO
       setQuizLoading(true);
       fetch(`/api/quiz/${targetId}`)
         .then(res => res.json())
@@ -158,6 +186,78 @@ export default function Profile() {
   useEffect(() => {
     fetchProfile();
   }, [navigate, userId]); 
+
+  // --- AÇÃO DE SEGUIR ---
+  const handleFollowToggle = async () => {
+      const loggedUserId = localStorage.getItem("userId");
+      if (!loggedUserId) return toast.error("Faça login para seguir.");
+      
+      try {
+          const res = await fetch("/api/user/follow", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ follower_id: parseInt(loggedUserId), followed_id: profile.id })
+          });
+          
+          if (res.ok) {
+              const data = await res.json();
+              if (data.status === "followed") {
+                  setIsFollowing(true);
+                  setFollowersCount(prev => prev + 1);
+                  toast.success(`Seguindo ${profile.nickname}!`);
+              } else {
+                  setIsFollowing(false);
+                  setFollowersCount(prev => prev - 1);
+                  toast.success("Deixou de seguir.");
+              }
+              // Atualiza lista
+              const socialRes = await fetch(`/api/user/${profile.id}/social_list`);
+              if (socialRes.ok) setSocialData(await socialRes.json());
+          }
+      } catch (e) { toast.error("Erro de conexão."); }
+  };
+
+  // --- AÇÃO DE AMIZADE ---
+  const handleFriendAction = async () => {
+      const loggedUserId = localStorage.getItem("userId");
+      if (!loggedUserId) return;
+      const targetId = profile.id;
+
+      try {
+          if (friendStatus === 'none') {
+              // ENVIAR SOLICITAÇÃO
+              const res = await fetch("/api/friend/request", {
+                  method: "POST", 
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({ sender_id: parseInt(loggedUserId), target_id: targetId })
+              });
+              if (res.ok) {
+                  setFriendStatus("pending_sent");
+                  toast.success("Solicitação enviada!");
+              }
+          } else if (friendStatus === 'pending_received') {
+              // ACEITAR SOLICITAÇÃO
+              const res = await fetch("/api/friend/accept", {
+                  method: "POST", 
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({ sender_id: parseInt(loggedUserId), target_id: targetId })
+              });
+              if (res.ok) {
+                  setFriendStatus("friends");
+                  toast.success("Agora vocês são amigos!");
+                  fetchProfile(); // Recarrega para aparecer na lista
+              }
+          } else if (friendStatus === 'friends' || friendStatus === 'pending_sent') {
+              // REMOVER AMIGO OU CANCELAR PEDIDO
+              const res = await fetch(`/api/friend/remove?sender_id=${loggedUserId}&target_id=${targetId}`, { method: "DELETE" });
+              if (res.ok) {
+                  setFriendStatus("none");
+                  toast.success("Removido/Cancelado.");
+                  fetchProfile();
+              }
+          }
+      } catch (e) { toast.error("Erro na ação de amizade."); }
+  };
 
   const handleSaveFavorites = async () => {
     if (selectedFavorites.length > 3) {
@@ -194,14 +294,12 @@ export default function Profile() {
     } catch (e) { toast.error("Erro de conexão"); }
   };
 
-  // --- LÓGICA DE RESPOSTA DO QUIZ (UNIFICADA) ---
   const handleAnswer = (correct: boolean) => {
       if (answerState !== 'idle') return;
 
       setAnswerState(correct ? 'correct' : 'incorrect');
       if (correct) setQuizScore(prev => prev + 1);
 
-      // Delay para próxima etapa
       setTimeout(() => {
           if (currentQuestionIndex + 1 < quizQuestions.length) {
               setCurrentQuestionIndex(prev => prev + 1);
@@ -215,23 +313,19 @@ export default function Profile() {
       }, 1500);
   };
 
-  // 1. Lógica para Múltipla Escolha / Gênero
   const handleOptionClick = (val: number | string, correctVal: number | string) => {
       setSelectedOptionId(val);
       handleAnswer(val === correctVal);
   };
 
-  // 2. Lógica para Versus
   const handleVersusClick = (id: number, correctId: number) => {
       setVersusSelected(id);
       handleAnswer(id === correctId);
   };
 
-  // 3. Lógica para Slider
   const handleSliderConfirm = (correctScore: number) => {
       const val = sliderValue[0];
       const diff = Math.abs(val - correctScore);
-      // Margem de erro de 0.5 é aceitável como "correto"
       const isCorrect = diff <= 0.5;
       handleAnswer(isCorrect);
   };
@@ -315,15 +409,54 @@ export default function Profile() {
 
         <div className="max-w-7xl mx-auto space-y-6">
           
-          <ProfileHeader 
-             username={profile.nickname || profile.username} 
-             level={profile.level}
-             rank={`XP: ${profile.xp}`} 
-             avatarUrl={profile.avatar_url}
-             bannerUrl={profile.banner_url}
-             xp={profile.xp}
-             bio={profile.bio || "Insira sua bio"} 
-          />
+          {/* HEADER COM BOTÕES DE AÇÃO SOCIAL */}
+          <div className="relative">
+              <ProfileHeader 
+                 username={profile.nickname || profile.username} 
+                 level={profile.level}
+                 rank={`XP: ${profile.xp}`} 
+                 avatarUrl={profile.avatar_url}
+                 bannerUrl={profile.banner_url}
+                 xp={profile.xp}
+                 bio={profile.bio || "Insira sua bio"}
+                 followersCount={followersCount}
+              />
+              
+              {!isOwner && (
+                  <div className="absolute top-4 right-4 z-30 flex flex-col md:flex-row gap-2">
+                      {/* BOTÃO DE SEGUIR */}
+                      <Button 
+                        onClick={handleFollowToggle} 
+                        size="sm"
+                        className={`font-bold border transition-all ${isFollowing ? 'bg-black/50 border-white/20 text-gray-300 hover:bg-red-900/50 hover:border-red-500 hover:text-white' : 'bg-primary text-black border-primary hover:bg-primary/90'}`}
+                      >
+                          {isFollowing ? "Deixar de Seguir" : "Seguir +"}
+                      </Button>
+
+                      {/* BOTÃO DE AMIGO */}
+                      {friendStatus === 'none' && (
+                          <Button onClick={handleFriendAction} size="sm" variant="outline" className="border-white/20 text-white hover:bg-white/10">
+                              <UserPlus className="w-4 h-4 mr-1" /> Add Amigo
+                          </Button>
+                      )}
+                      {friendStatus === 'pending_sent' && (
+                          <Button onClick={handleFriendAction} size="sm" variant="outline" className="border-yellow-500/50 text-yellow-500 bg-yellow-500/10 hover:bg-yellow-500/20">
+                              <Loader2 className="w-4 h-4 mr-1 animate-spin" /> Enviado
+                          </Button>
+                      )}
+                      {friendStatus === 'pending_received' && (
+                          <Button onClick={handleFriendAction} size="sm" className="bg-green-600 text-white hover:bg-green-700 border-green-600">
+                              <UserCheck className="w-4 h-4 mr-1" /> Aceitar
+                          </Button>
+                      )}
+                      {friendStatus === 'friends' && (
+                          <Button onClick={handleFriendAction} size="sm" variant="outline" className="border-green-500/50 text-green-500 bg-green-500/10 hover:bg-red-900/50 hover:text-red-500 hover:border-red-500">
+                              <Users className="w-4 h-4 mr-1" /> Amigos
+                          </Button>
+                      )}
+                  </div>
+              )}
+          </div>
 
           {/* SEÇÃO: CÍRCULO PRÓXIMO (CONEXÕES COMPATÍVEIS) */}
           {connections.length > 0 && (
@@ -360,7 +493,7 @@ export default function Profile() {
                    <Award className="w-4 h-4 mr-2 hidden md:inline" /> Visão Geral
                 </TabsTrigger>
                 <TabsTrigger value="steam" className="data-[state=active]:bg-primary data-[state=active]:text-black text-xs md:text-sm py-2">
-                   <LinkIcon className="w-4 h-4 mr-2 hidden md:inline" /> Redes
+                   <LinkIcon className="w-4 h-4 mr-2 hidden md:inline" /> Redes & Social
                 </TabsTrigger>
                 <TabsTrigger value="library" className="data-[state=active]:bg-primary data-[state=active]:text-black text-xs md:text-sm py-2">
                    <Gamepad2 className="w-4 h-4 mr-2 hidden md:inline" /> Jogos ({allGames.length})
@@ -573,16 +706,15 @@ export default function Profile() {
               )}
             </TabsContent>
 
-            {/* --- REDES & STEAM --- */}
-            <TabsContent value="steam" className="animate-fade-in space-y-6">
+            {/* --- REDES & SOCIAL --- */}
+            <TabsContent value="steam" className="animate-fade-in space-y-8">
                 <div className="glass-panel rounded-2xl border-2 border-[#1b2838] bg-[#0f1114] p-8 min-h-[50vh] flex flex-col items-center justify-center">
                     <h2 className="text-2xl font-bold text-white mb-2">Redes Conectadas</h2>
                     <p className="text-gray-400 mb-10 text-center max-w-lg">
-                       Acesse os perfis oficiais de jogos deste usuário clicando nos cards abaixo.
+                       Links oficiais para os perfis deste jogador.
                     </p>
 
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-6 w-full max-w-4xl">
-                        
                         {/* STEAM */}
                         {profile.social.steam ? (
                            <a href={profile.social.steam} target="_blank" rel="noreferrer" 
@@ -590,18 +722,13 @@ export default function Profile() {
                               <img src={steamLogo} className="w-16 h-16 opacity-80 group-hover:opacity-100 transition-opacity" />
                               <div>
                                  <h3 className="text-xl font-bold text-white group-hover:text-[#66c0f4]">Steam</h3>
-                                 <p className="text-sm text-gray-400 flex items-center gap-1 group-hover:text-white">
-                                    Ver Perfil <ExternalLink className="w-3 h-3" />
-                                 </p>
+                                 <p className="text-sm text-gray-400 flex items-center gap-1 group-hover:text-white">Ver Perfil <ExternalLink className="w-3 h-3" /></p>
                               </div>
                            </a>
                         ) : (
                            <div className="bg-[#171a21]/50 border border-white/5 p-6 rounded-xl flex items-center gap-4 opacity-50 grayscale">
                               <img src={steamLogo} className="w-16 h-16" />
-                              <div>
-                                 <h3 className="text-xl font-bold text-gray-500">Steam</h3>
-                                 <p className="text-sm text-gray-600">Não vinculado</p>
-                              </div>
+                              <div><h3 className="text-xl font-bold text-gray-500">Steam</h3><p className="text-sm text-gray-600">Não vinculado</p></div>
                            </div>
                         )}
 
@@ -612,18 +739,13 @@ export default function Profile() {
                               <img src={xboxLogo} className="w-16 h-16 opacity-80 group-hover:opacity-100 transition-opacity" />
                               <div>
                                  <h3 className="text-xl font-bold text-white group-hover:text-[#107c10]">Xbox Live</h3>
-                                 <p className="text-sm text-gray-400 flex items-center gap-1 group-hover:text-white">
-                                    Ver Perfil <ExternalLink className="w-3 h-3" />
-                                 </p>
+                                 <p className="text-sm text-gray-400 flex items-center gap-1 group-hover:text-white">Ver Perfil <ExternalLink className="w-3 h-3" /></p>
                               </div>
                            </a>
                         ) : (
                            <div className="bg-[#171a21]/50 border border-white/5 p-6 rounded-xl flex items-center gap-4 opacity-50 grayscale">
                               <img src={xboxLogo} className="w-16 h-16" />
-                              <div>
-                                 <h3 className="text-xl font-bold text-gray-500">Xbox</h3>
-                                 <p className="text-sm text-gray-600">Não vinculado</p>
-                              </div>
+                              <div><h3 className="text-xl font-bold text-gray-500">Xbox</h3><p className="text-sm text-gray-600">Não vinculado</p></div>
                            </div>
                         )}
 
@@ -634,18 +756,13 @@ export default function Profile() {
                               <img src={psnLogo} className="w-16 h-16 opacity-80 group-hover:opacity-100 transition-opacity" />
                               <div>
                                  <h3 className="text-xl font-bold text-white group-hover:text-[#0070d1]">PlayStation</h3>
-                                 <p className="text-sm text-gray-400 flex items-center gap-1 group-hover:text-white">
-                                    Ver Perfil <ExternalLink className="w-3 h-3" />
-                                 </p>
+                                 <p className="text-sm text-gray-400 flex items-center gap-1 group-hover:text-white">Ver Perfil <ExternalLink className="w-3 h-3" /></p>
                               </div>
                            </a>
                         ) : (
                            <div className="bg-[#171a21]/50 border border-white/5 p-6 rounded-xl flex items-center gap-4 opacity-50 grayscale">
                               <img src={psnLogo} className="w-16 h-16" />
-                              <div>
-                                 <h3 className="text-xl font-bold text-gray-500">PlayStation</h3>
-                                 <p className="text-sm text-gray-600">Não vinculado</p>
-                              </div>
+                              <div><h3 className="text-xl font-bold text-gray-500">PlayStation</h3><p className="text-sm text-gray-600">Não vinculado</p></div>
                            </div>
                         )}
 
@@ -656,21 +773,15 @@ export default function Profile() {
                               <img src={epicLogo} className="w-16 h-16 opacity-80 group-hover:opacity-100 transition-opacity" />
                               <div>
                                  <h3 className="text-xl font-bold text-white">Epic Games</h3>
-                                 <p className="text-sm text-gray-400 flex items-center gap-1 group-hover:text-white">
-                                    Ver Perfil <ExternalLink className="w-3 h-3" />
-                                 </p>
+                                 <p className="text-sm text-gray-400 flex items-center gap-1 group-hover:text-white">Ver Perfil <ExternalLink className="w-3 h-3" /></p>
                               </div>
                            </a>
                         ) : (
                            <div className="bg-[#171a21]/50 border border-white/5 p-6 rounded-xl flex items-center gap-4 opacity-50 grayscale">
                               <img src={epicLogo} className="w-16 h-16" />
-                              <div>
-                                 <h3 className="text-xl font-bold text-gray-500">Epic Games</h3>
-                                 <p className="text-sm text-gray-600">Não vinculado</p>
-                              </div>
+                              <div><h3 className="text-xl font-bold text-gray-500">Epic Games</h3><p className="text-sm text-gray-600">Não vinculado</p></div>
                            </div>
                         )}
-
                     </div>
                     
                     {isOwner && (
@@ -678,6 +789,42 @@ export default function Profile() {
                            <Edit className="w-4 h-4 mr-2" /> Gerenciar Links
                         </Button>
                     )}
+                </div>
+
+                {/* LISTA DE AMIGOS (Mútuos) */}
+                <div className="max-w-4xl mx-auto">
+                    <h3 className="text-lg font-bold text-white mb-4 flex items-center gap-2 border-b border-white/10 pb-2">
+                        <Users className="w-5 h-5 text-primary" /> Amigos (Confirmados)
+                    </h3>
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                        {socialData.friends.length > 0 ? socialData.friends.map((u: any) => (
+                            <Link to={`/profile/${u.id}`} key={u.id} className="bg-[#1a1c1f] p-3 rounded-lg flex items-center gap-3 border border-white/5 hover:border-primary/50 transition-all">
+                                <Avatar className="h-8 w-8">
+                                    <AvatarImage src={u.avatar_url} />
+                                    <AvatarFallback>{u.username[0]}</AvatarFallback>
+                                </Avatar>
+                                <span className="text-sm font-bold text-white truncate">{u.nickname || u.username}</span>
+                            </Link>
+                        )) : <p className="text-gray-500 text-sm col-span-full">Nenhum amigo confirmado ainda.</p>}
+                    </div>
+                </div>
+
+                {/* LISTA DE SEGUIDORES */}
+                <div className="max-w-4xl mx-auto">
+                    <h3 className="text-lg font-bold text-white mb-4 flex items-center gap-2 border-b border-white/10 pb-2">
+                        <Star className="w-5 h-5 text-yellow-400" /> Seguidores
+                    </h3>
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                        {socialData.followers.length > 0 ? socialData.followers.map((u: any) => (
+                            <Link to={`/profile/${u.id}`} key={u.id} className="bg-[#1a1c1f] p-3 rounded-lg flex items-center gap-3 border border-white/5 hover:border-white/20 transition-all">
+                                <Avatar className="h-8 w-8">
+                                    <AvatarImage src={u.avatar_url} />
+                                    <AvatarFallback>{u.username[0]}</AvatarFallback>
+                                </Avatar>
+                                <span className="text-sm text-gray-400 truncate">{u.nickname || u.username}</span>
+                            </Link>
+                        )) : <p className="text-gray-500 text-sm col-span-full">Nenhum seguidor novo.</p>}
+                    </div>
                 </div>
             </TabsContent>
 
