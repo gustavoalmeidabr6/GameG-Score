@@ -6,7 +6,8 @@ import {
   Gamepad2, List, Trash2, MessageSquare, Heart, Quote,
   Shield, Eye, Headphones, Book, Cpu, Sword, Map, Scale, AlertTriangle,
   Loader2, HelpCircle, Save, CheckCircle2, XCircle, BrainCircuit, Users,
-  Swords, MousePointerClick, UserPlus, UserCheck, UserMinus, Bell
+  Swords, MousePointerClick, UserPlus, UserCheck, UserMinus, Bell,
+  Search, Image as ImageIcon
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { RadarChart } from "@/components/RadarChart";
@@ -21,6 +22,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Progress } from "@/components/ui/progress";
 import { Slider } from "@/components/ui/slider";
+import { Input } from "@/components/ui/input";
 
 // Logos
 import steamLogo from "@/assets/steam.png";
@@ -78,6 +80,16 @@ export default function Profile() {
   const [selectedOptionId, setSelectedOptionId] = useState<number | string | null>(null);
   const [sliderValue, setSliderValue] = useState<number[]>([5.0]);
   const [versusSelected, setVersusSelected] = useState<number | null>(null);
+
+  // --- NOVOS ESTADOS PARA O MINIGAME DE CAPA (GUESS THE COVER) ---
+  const [coverGames, setCoverGames] = useState<any[]>([]);
+  const [coverIndex, setCoverIndex] = useState(0);
+  const [coverAttempts, setCoverAttempts] = useState(0); // 0 a 4
+  const [coverScore, setCoverScore] = useState(0);
+  const [coverGameState, setCoverGameState] = useState<'intro' | 'playing' | 'won' | 'lost' | 'finished'>('intro');
+  const [coverSearchQuery, setCoverSearchQuery] = useState("");
+  const [coverSearchResults, setCoverSearchResults] = useState<any[]>([]);
+  const [isImageLoading, setIsImageLoading] = useState(false); // <--- ESTADO DE CARREGAMENTO DA IMAGEM
 
   // Estados de carregamento
   const [loadingProfile, setLoadingProfile] = useState(true);
@@ -182,6 +194,16 @@ export default function Profile() {
         })
         .catch(err => console.error("Erro Quiz:", err))
         .finally(() => setQuizLoading(false));
+
+      // 6. FETCH COVER MINIGAME DATA
+      fetch(`/api/minigame/cover/${targetId}`)
+        .then(res => res.json())
+        .then(data => {
+            if (Array.isArray(data) && data.length >= 3) {
+                setCoverGames(data);
+            }
+        })
+        .catch(err => console.error("Erro Cover Minigame:", err));
 
     } catch (error) {
       console.error(error);
@@ -384,6 +406,101 @@ export default function Profile() {
       else { message = "Precisa stalkear mais... 🕵️"; color = "text-red-400"; }
 
       return { percentage, message, color };
+  };
+
+  // --- LÓGICA MINIGAME DE CAPA ---
+  
+  // Efeito de Debounce na Busca
+  useEffect(() => {
+    const delayDebounce = setTimeout(async () => {
+      if (coverSearchQuery.length > 2) {
+        try {
+          const res = await fetch(`/api/search?q=${coverSearchQuery}`);
+          if (res.ok) {
+             let data = await res.json();
+             
+             // Ordena localmente: Jogos que COMEÇAM com o termo aparecem primeiro
+             data.sort((a: any, b: any) => {
+                const query = coverSearchQuery.toLowerCase();
+                const nameA = a.name.toLowerCase();
+                const nameB = b.name.toLowerCase();
+                const startsA = nameA.startsWith(query);
+                const startsB = nameB.startsWith(query);
+                if (startsA && !startsB) return -1;
+                if (!startsA && startsB) return 1;
+                return 0;
+             });
+             
+             setCoverSearchResults(data);
+          }
+        } catch (e) { console.error(e); }
+      } else {
+        setCoverSearchResults([]);
+      }
+    }, 500); // 500ms de atraso para evitar lag
+
+    return () => clearTimeout(delayDebounce);
+  }, [coverSearchQuery]);
+
+  const handleCoverSearch = (val: string) => {
+      setCoverSearchQuery(val);
+  };
+
+  // FUNÇÃO AUXILIAR PARA NORMALIZAR TÍTULOS (Corta após o número)
+  const normalizeGameTitle = (title: string) => {
+      const clean = title.toLowerCase().replace(/[^a-z0-9\s]/g, ""); // mantém letras, números e espaços
+      // Procura por um número isolado (arabis ou romanos comuns) e captura até ele
+      const match = clean.match(/^(.*?\b(?:\d+|i|ii|iii|iv|v|vi|vii|viii|ix|x)\b)/);
+      return match ? match[0].trim() : clean.trim();
+  };
+
+  const handleCoverGuess = (gameId: number, gameName: string) => {
+      const currentGame = coverGames[coverIndex];
+      
+      // LÓGICA DE VALIDAÇÃO: Normaliza ambos e compara
+      const cleanGuess = normalizeGameTitle(gameName);
+      const cleanCorrect = normalizeGameTitle(currentGame.name);
+      
+      // Se forem iguais após o corte do sufixo, valida como correto
+      const isCorrect = gameId === currentGame.id || cleanGuess === cleanCorrect;
+
+      if (isCorrect) {
+          toast.success("Correto!");
+          setCoverGameState('won');
+          setCoverScore(prev => prev + 1);
+          setTimeout(nextCoverRound, 1500);
+      } else {
+          const newAttempts = coverAttempts + 1;
+          setCoverAttempts(newAttempts);
+          if (newAttempts >= 4) {
+              setCoverGameState('lost');
+              toast.error(`Errou! Era: ${currentGame.name}`);
+              setTimeout(nextCoverRound, 2500);
+          } else {
+              toast.error(`Tente novamente! Restam ${4 - newAttempts} chances.`);
+          }
+      }
+      setCoverSearchQuery("");
+      setCoverSearchResults([]);
+  };
+
+  const nextCoverRound = () => {
+      if (coverIndex + 1 < coverGames.length) {
+          setIsImageLoading(true); // <--- ATIVA LOADING PARA ESCONDER A PRÓXIMA IMAGEM
+          setCoverIndex(prev => prev + 1);
+          setCoverAttempts(0);
+          setCoverGameState('playing');
+      } else {
+          setCoverGameState('finished');
+      }
+  };
+
+  const startCoverMinigame = () => {
+      setIsImageLoading(true); // <--- ATIVA LOADING INICIAL
+      setCoverIndex(0);
+      setCoverAttempts(0);
+      setCoverScore(0);
+      setCoverGameState('playing');
   };
 
   if (loadingProfile || !profile) {
@@ -921,7 +1038,7 @@ export default function Profile() {
             </TabsContent>
 
             {/* --- QUIZ (10 PERGUNTAS) --- */}
-            <TabsContent value="quiz" className="animate-fade-in">
+            <TabsContent value="quiz" className="animate-fade-in space-y-12">
                 <div className="glass-panel rounded-2xl border-2 border-primary/30 p-8 bg-black/60 min-h-[50vh] flex flex-col items-center justify-center">
                     {!quizFinished ? (
                         quizQuestions.length > 0 ? (
@@ -1111,6 +1228,126 @@ export default function Profile() {
                         </div>
                     )}
                 </div>
+
+                {/* --- NOVO MINIGAME: ADIVINHE O JOGO PELA CAPA --- */}
+                {coverGames.length > 0 && (
+                    <div className="glass-panel rounded-2xl border-2 border-green-500/30 p-8 bg-black/60 relative overflow-hidden">
+                        <div className="absolute top-0 right-0 p-6 opacity-5">
+                            <ImageIcon className="w-32 h-32 text-green-500" />
+                        </div>
+                        <h2 className="text-2xl font-black text-green-500 uppercase tracking-widest font-pixel mb-8 flex items-center gap-2 relative z-10">
+                            <Eye className="w-6 h-6" /> Adivinhe o Jogo
+                        </h2>
+
+                        {coverGameState === 'intro' ? (
+                            <div className="text-center py-10">
+                                <p className="text-gray-400 mb-6 text-lg">
+                                    Você consegue reconhecer os jogos que {profile.nickname || profile.username} jogou apenas pela capa borrada?
+                                </p>
+                                <Button onClick={startCoverMinigame} className="bg-green-500 text-black font-bold hover:bg-green-400 px-8 py-6 text-lg">
+                                    COMEÇAR DESAFIO
+                                </Button>
+                            </div>
+                        ) : coverGameState === 'finished' ? (
+                            <div className="text-center py-10 animate-fade-in">
+                                <Trophy className="w-20 h-20 text-yellow-400 mx-auto mb-4" />
+                                <h3 className="text-3xl font-black text-white font-pixel mb-2">FIM DE JOGO!</h3>
+                                <p className="text-xl text-gray-300 mb-6">
+                                    Você acertou <span className="text-green-500 font-bold">{coverScore}</span> de <span className="text-white font-bold">{coverGames.length}</span> jogos!
+                                </p>
+                                <Button onClick={startCoverMinigame} variant="outline" className="border-green-500 text-green-500 hover:bg-green-500/10">
+                                    Jogar Novamente
+                                </Button>
+                            </div>
+                        ) : (
+                            <div className="max-w-xl mx-auto flex flex-col items-center animate-fade-in relative z-10">
+                                <div className="w-full flex justify-between items-center mb-4 text-sm font-bold uppercase tracking-wider text-gray-500">
+                                    <span>Jogo {coverIndex + 1} / {coverGames.length}</span>
+                                    <span>Pontos: {coverScore}</span>
+                                </div>
+
+                                {/* CAPA BORRADA COM OVERLAY DE LOADING */}
+                                <div className="relative w-48 h-64 md:w-64 md:h-80 rounded-xl overflow-hidden border-4 border-white/10 shadow-2xl mb-6 bg-black">
+                                    
+                                    {/* LOADER OVERLAY: SÓ SAI QUANDO A IMAGEM CARREGA TOTALMENTE */}
+                                    {isImageLoading && (
+                                        <div className="absolute inset-0 flex items-center justify-center bg-black z-30">
+                                            <Loader2 className="w-10 h-10 text-green-500 animate-spin" />
+                                        </div>
+                                    )}
+
+                                    <img 
+                                        key={coverIndex} // FORÇA O REACT A RECRIAR A IMAGEM A CADA RODADA
+                                        src={coverGames[coverIndex].cover} 
+                                        className={`w-full h-full object-cover transition-all duration-700 ${isImageLoading ? 'opacity-0' : 'opacity-100'}`}
+                                        onLoad={() => setIsImageLoading(false)} 
+                                        style={{ 
+                                            filter: coverGameState === 'won' || coverGameState === 'lost' 
+                                                ? 'none' 
+                                                : `blur(${20 - (coverAttempts * 5)}px)` 
+                                        }}
+                                    />
+                                    {/* Overlay de Resultado */}
+                                    {(coverGameState === 'won' || coverGameState === 'lost') && (
+                                        <div className={`absolute inset-0 flex items-center justify-center bg-black/60 backdrop-blur-sm animate-fade-in z-20`}>
+                                            {coverGameState === 'won' ? (
+                                                <CheckCircle2 className="w-20 h-20 text-green-500 drop-shadow-[0_0_15px_rgba(34,197,94,0.8)]" />
+                                            ) : (
+                                                <XCircle className="w-20 h-20 text-red-500 drop-shadow-[0_0_15px_rgba(239,68,68,0.8)]" />
+                                            )}
+                                        </div>
+                                    )}
+                                </div>
+
+                                {/* DICA */}
+                                <div className="bg-white/5 border border-white/10 px-4 py-2 rounded-lg text-sm text-green-400 font-mono mb-6 text-center max-w-md">
+                                    💡 DICA: {coverGames[coverIndex].hint}
+                                </div>
+
+                                {/* INPUT DE PESQUISA */}
+                                <div className="w-full relative">
+                                    <div className="relative">
+                                        <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-500" />
+                                        <Input 
+                                            placeholder="Qual é o nome do jogo?" 
+                                            className="pl-10 h-12 bg-black/50 border-white/20 focus:border-green-500 text-white"
+                                            value={coverSearchQuery}
+                                            onChange={(e) => handleCoverSearch(e.target.value)}
+                                            disabled={coverGameState !== 'playing'}
+                                        />
+                                    </div>
+                                    
+                                    {/* DROPDOWN RESULTADOS */}
+                                    {coverSearchResults.length > 0 && (
+                                        <div className="absolute top-full left-0 right-0 mt-2 bg-[#1a1c1f] border border-white/10 rounded-xl shadow-xl z-50 max-h-60 overflow-y-auto">
+                                            {coverSearchResults.map((game: any) => (
+                                                <button
+                                                    key={game.id}
+                                                    onClick={() => handleCoverGuess(game.id, game.name)}
+                                                    className="w-full text-left p-3 hover:bg-white/5 flex items-center gap-3 border-b border-white/5 last:border-0 transition-colors"
+                                                >
+                                                    <img src={game.image?.thumb_url || "/placeholder.png"} className="w-8 h-8 rounded object-cover" />
+                                                    <span className="font-bold text-white text-sm truncate">{game.name}</span>
+                                                </button>
+                                            ))}
+                                        </div>
+                                    )}
+                                </div>
+
+                                {/* INDICADOR DE TENTATIVAS */}
+                                <div className="flex gap-2 mt-6">
+                                    {[...Array(4)].map((_, i) => (
+                                        <div 
+                                            key={i} 
+                                            className={`w-3 h-3 rounded-full transition-colors ${i < coverAttempts ? 'bg-red-500' : 'bg-gray-700'}`}
+                                        />
+                                    ))}
+                                </div>
+                                <p className="text-xs text-gray-500 mt-2 uppercase tracking-widest">Tentativas Restantes: {4 - coverAttempts}</p>
+                            </div>
+                        )}
+                    </div>
+                )}
             </TabsContent>
 
             {/* --- CONTEÚDO: BIBLIOTECA (Todos os jogos) --- */}
