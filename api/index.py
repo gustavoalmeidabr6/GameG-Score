@@ -1455,3 +1455,186 @@ def generate_quiz(user_id: int, db: Session = Depends(get_db)):
         })
 
     return questions[:10]
+# ==============================================================================
+#  NOVAS ROTAS: DADOS (Lançamentos e Notícias)
+# ==============================================================================
+
+@app.get("/api/games/upcoming")
+def get_upcoming_games():
+    headers = get_igdb_headers()
+    if not headers: return []
+
+    # Pega o timestamp atual para filtrar jogos futuros
+    current_time = int(time.time())
+    
+    url = "https://api.igdb.com/v4/games"
+    # Busca jogos com data de lançamento maior que hoje, ordenados por data
+    body = f'fields name, cover.url, first_release_date, summary, platforms.name, genres.name; where first_release_date > {current_time} & cover != null & platforms = (6,167,169,48,49,130); sort first_release_date asc; limit 12;'
+    
+    try:
+        response = requests.post(url, headers=headers, data=body)
+        games = response.json()
+        
+        results = []
+        for game in games:
+            cover_url = ""
+            if "cover" in game:
+                cover_url = format_igdb_image(game["cover"]["url"], "t_cover_big")
+            
+            platforms = [p["name"] for p in game.get("platforms", [])]
+            genres = [g["name"] for g in game.get("genres", [])]
+
+            results.append({
+                "id": game["id"],
+                "name": game["name"],
+                "image": cover_url,
+                "release_date": game.get("first_release_date"),
+                "summary": game.get("summary", "Sem descrição."),
+                "platforms": platforms[:3], # Limita a 3 plataformas para não poluir
+                "genres": genres[:2]
+            })
+        return results
+    except Exception as e:
+        print(f"Erro ao buscar lançamentos IGDB: {e}")
+        return []
+
+@app.get("/api/news/latest")
+def get_latest_news():
+    # Como a Steam News é por AppID, vamos pegar notícias de alguns jogos populares/relevantes
+    # IDs: 730 (CS2), 570 (Dota 2), 1086940 (Baldur's Gate 3), 1172470 (Apex), 271590 (GTA V)
+    target_app_ids = [1086940, 730, 570, 1172470, 1245620] # BG3, CS2, Dota2, Apex, Elden Ring
+    
+    all_news = []
+    
+    for app_id in target_app_ids:
+        try:
+            url = f"http://api.steampowered.com/ISteamNews/GetNewsForApp/v0002/?appid={app_id}&count=2&maxlength=300&format=json"
+            res = requests.get(url, timeout=2)
+            data = res.json()
+            
+            if "appnews" in data and "newsitems" in data["appnews"]:
+                items = data["appnews"]["newsitems"]
+                for item in items:
+                    # Limpa tags HTML básicas do conteúdo para ficar legível
+                    clean_content = re.sub('<[^<]+?>', '', item.get("contents", ""))
+                    
+                    all_news.append({
+                        "id": item.get("gid"),
+                        "title": item.get("title"),
+                        "url": item.get("url"),
+                        "author": item.get("author", "Steam"),
+                        "date": item.get("date"),
+                        "game_id": app_id,
+                        "content_snippet": clean_content[:150] + "..."
+                    })
+        except:
+            continue
+            
+    # Ordena todas as notícias por data (mais recente primeiro)
+    all_news.sort(key=lambda x: x["date"], reverse=True)
+    return all_news[:10]
+# ==============================================================================
+#  NOVAS ROTAS: DADOS (Lançamentos e Notícias com Tradução)
+# ==============================================================================
+
+# Função auxiliar de tradução segura
+def safe_translate(text):
+    if not text or len(text) < 2:
+        return text
+    try:
+        from deep_translator import GoogleTranslator
+        # Traduz do inglês (auto) para português (pt)
+        return GoogleTranslator(source='auto', target='pt').translate(text)
+    except ImportError:
+        print("ERRO: 'deep-translator' não instalado. Rodar: pip install deep-translator")
+        return text
+    except Exception as e:
+        print(f"Erro ao traduzir trecho: {e}")
+        return text
+
+@app.get("/api/games/upcoming")
+def get_upcoming_games():
+    headers = get_igdb_headers()
+    if not headers: return []
+
+    current_time = int(time.time())
+    
+    # Busca lançamentos futuros
+    url = "https://api.igdb.com/v4/games"
+    body = f'fields name, cover.url, first_release_date, summary, platforms.name, genres.name; where first_release_date > {current_time} & cover != null & platforms = (6,167,169,48,49,130); sort first_release_date asc; limit 12;'
+    
+    try:
+        response = requests.post(url, headers=headers, data=body)
+        games = response.json()
+        
+        results = []
+        for game in games:
+            cover_url = ""
+            if "cover" in game:
+                cover_url = format_igdb_image(game["cover"]["url"], "t_cover_big")
+            
+            platforms = [p["name"] for p in game.get("platforms", [])]
+            genres = [g["name"] for g in game.get("genres", [])]
+
+            # TRADUÇÃO INDIVIDUAL
+            original_summary = game.get("summary", "Sem descrição.")
+            translated_summary = safe_translate(original_summary)
+
+            results.append({
+                "id": game["id"],
+                "name": game["name"],
+                "image": cover_url,
+                "release_date": game.get("first_release_date"),
+                "summary": translated_summary,
+                "platforms": platforms[:3],
+                "genres": genres[:2]
+            })
+        return results
+    except Exception as e:
+        print(f"Erro ao buscar lançamentos IGDB: {e}")
+        return []
+
+@app.get("/api/news/latest")
+def get_latest_news():
+    # IDs: BG3, CS2, Dota2, Apex, Elden Ring, GTA V
+    target_app_ids = [1086940, 730, 570, 1172470, 1245620, 271590]
+    
+    raw_news = []
+    
+    for app_id in target_app_ids:
+        try:
+            # Pegando apenas 1 notícia de cada para ser mais rápido na tradução
+            url = f"http://api.steampowered.com/ISteamNews/GetNewsForApp/v0002/?appid={app_id}&count=1&maxlength=300&format=json"
+            res = requests.get(url, timeout=2)
+            data = res.json()
+            
+            if "appnews" in data and "newsitems" in data["appnews"]:
+                items = data["appnews"]["newsitems"]
+                for item in items:
+                    clean_content = re.sub('<[^<]+?>', '', item.get("contents", ""))
+                    
+                    # TRADUÇÃO DE TÍTULO E CONTEÚDO
+                    title_pt = safe_translate(item.get("title"))
+                    content_pt = safe_translate(clean_content[:150] + "...")
+
+                    raw_news.append({
+                        "id": item.get("gid"),
+                        "title": title_pt,
+                        "url": item.get("url"),
+                        "author": item.get("author", "Steam"),
+                        "date": item.get("date"),
+                        "game_id": app_id,
+                        "content_snippet": content_pt
+                    })
+        except Exception as e:
+            print(f"Erro ao buscar notícia app {app_id}: {e}")
+            continue
+            
+    # Ordena por data
+    raw_news.sort(key=lambda x: x["date"], reverse=True)
+    return raw_news
+
+if __name__ == "__main__":
+    import uvicorn
+    # Apenas para teste local direto, se necessário
+    uvicorn.run(app, host="0.0.0.0", port=8000)
