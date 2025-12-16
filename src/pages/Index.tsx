@@ -1,9 +1,9 @@
 import { ProfileHeader } from "@/components/ProfileHeader";
 import { NavigationMenu } from "@/components/NavigationMenu";
 import welcomeBg from "@/assets/welcome-bg.jpg";
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import { useNavigate } from "react-router-dom";
-import { Search, Star } from "lucide-react";
+import { Search, Star, PlayCircle } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { toast } from "sonner";
 
@@ -14,7 +14,87 @@ type GameSearchResult = {
     thumb_url: string | null;
     medium_url: string | null; 
   };
-  average_score?: number; // Adicionamos a nota opcional aqui
+  average_score?: number;
+  video_id?: string;
+};
+
+// --- COMPONENTE INTERNO PARA GERENCIAR O MOUSE OVER E VÍDEO ---
+const GameCard = ({ game, onClick }: { game: GameSearchResult; onClick: (id: number) => void }) => {
+  const [showVideo, setShowVideo] = useState(false);
+  const timeoutRef = useRef<NodeJS.Timeout | null>(null);
+
+  const handleMouseEnter = () => {
+    if (game.video_id) {
+      timeoutRef.current = setTimeout(() => {
+        setShowVideo(true);
+      }, 600);
+    }
+  };
+
+  const handleMouseLeave = () => {
+    if (timeoutRef.current) {
+      clearTimeout(timeoutRef.current);
+    }
+    setShowVideo(false);
+  };
+
+  return (
+    <div 
+      onClick={() => onClick(game.id)}
+      onMouseEnter={handleMouseEnter}
+      onMouseLeave={handleMouseLeave}
+      className="group relative aspect-[3/4] overflow-hidden rounded-lg border border-white/10 bg-black/40 transition-all hover:border-gaming-neon/50 hover:shadow-[0_0_30px_-5px_rgba(59,190,93,0.3)] cursor-pointer"
+    >
+      <div className="absolute inset-0 overflow-hidden">
+        {showVideo && game.video_id ? (
+           <div className="absolute inset-0 z-10 bg-black animate-in fade-in duration-300 overflow-hidden">
+              <div className="absolute top-1/2 left-1/2 w-[350%] h-[150%] -translate-x-1/2 -translate-y-1/2 pointer-events-none">
+                  <iframe 
+                    width="100%" 
+                    height="100%" 
+                    src={`https://www.youtube.com/embed/${game.video_id}?autoplay=1&mute=1&controls=0&showinfo=0&modestbranding=1&loop=1&playlist=${game.video_id}`} 
+                    title={game.name} 
+                    className="w-full h-full object-cover opacity-80"
+                    frameBorder="0"
+                    allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                  />
+              </div>
+              <div className="absolute top-2 left-2 z-20 bg-gaming-neon/90 text-black text-[10px] font-bold px-2 py-0.5 rounded flex items-center gap-1 shadow-md backdrop-blur-sm">
+                 <PlayCircle className="w-3 h-3" /> PREVIEW
+              </div>
+              <div className="absolute inset-0 bg-gradient-to-t from-black via-transparent to-transparent pointer-events-none" />
+           </div>
+        ) : (
+           game.image?.medium_url ? (
+            <img
+              src={game.image.medium_url}
+              alt={game.name}
+              className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-110"
+            />
+          ) : (
+            <div className="h-full w-full flex items-center justify-center bg-gray-800 text-gray-500">
+              Sem Imagem
+            </div>
+          )
+        )}
+        
+        {!showVideo && game.average_score !== undefined && (
+           <div className="absolute top-2 right-2 bg-black/80 backdrop-blur-md border border-primary text-primary font-black text-sm px-2 py-1 rounded flex items-center gap-1 shadow-lg z-20">
+              <Star className="w-3 h-3 fill-primary" />
+              {game.average_score.toFixed(1)}
+           </div>
+        )}
+
+        <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/20 to-transparent opacity-80 transition-opacity group-hover:opacity-60 pointer-events-none" />
+      </div>
+
+      <div className="absolute bottom-0 left-0 right-0 p-4 translate-y-2 group-hover:translate-y-0 transition-transform z-30">
+        <h3 className="font-bold text-white text-lg leading-tight line-clamp-2 group-hover:text-gaming-neon transition-colors font-sans drop-shadow-md">
+          {game.name}
+        </h3>
+      </div>
+    </div>
+  );
 };
 
 const Index = () => {
@@ -38,9 +118,8 @@ const Index = () => {
             setUserProfile(data);
             setUsername(data.username);
           } else {
-            console.warn("Sessão inválida detectada. Realizando logout...");
-            localStorage.clear();
-            navigate("/");
+            console.warn("Sessão inválida detectada.");
+            localStorage.removeItem("userId"); // Apenas remove o ID se inválido
           }
         } catch (error) {
           console.error("Erro ao carregar perfil na home:", error);
@@ -52,7 +131,6 @@ const Index = () => {
     loadBestRatedGames(); 
   }, []);
 
-  // --- NOVA FUNÇÃO DE BUSCA ---
   const loadBestRatedGames = async () => {
     setLoading(true);
     setIsSearching(false);
@@ -127,7 +205,12 @@ const Index = () => {
             xp={userProfile?.xp || 0}
             avatarUrl={userProfile?.avatar_url || ""} 
             bannerUrl={userProfile?.banner_url}
-            bio={userProfile?.bio} // Passando a bio aqui também
+            bio={userProfile?.bio}
+            followersCount={userProfile?.followers_count || 0} // PASSANDO OS SEGUIDORES AQUI
+            onLogout={() => {
+               localStorage.removeItem("userId");
+               navigate("/");
+            }}
           />
 
           <div className="flex flex-col md:flex-row items-center justify-between gap-4">
@@ -159,41 +242,11 @@ const Index = () => {
               
               <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6">
                 {games.map((game) => (
-                  <div 
-                    key={game.id}
-                    onClick={() => handleGameClick(game.id)}
-                    className="group relative aspect-[3/4] overflow-hidden rounded-lg border border-white/10 bg-black/40 transition-all hover:border-gaming-neon/50 hover:shadow-[0_0_30px_-5px_rgba(59,190,93,0.3)] cursor-pointer"
-                  >
-                    <div className="absolute inset-0">
-                      {game.image?.medium_url ? (
-                        <img
-                          src={game.image.medium_url}
-                          alt={game.name}
-                          className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-110"
-                        />
-                      ) : (
-                        <div className="h-full w-full flex items-center justify-center bg-gray-800 text-gray-500">
-                          Sem Imagem
-                        </div>
-                      )}
-                      
-                      {/* --- NOVO: BADGE DE NOTA MÉDIA --- */}
-                      {!isSearching && game.average_score !== undefined && (
-                         <div className="absolute top-2 right-2 bg-black/80 backdrop-blur-md border border-primary text-primary font-black text-sm px-2 py-1 rounded flex items-center gap-1 shadow-lg z-20">
-                            <Star className="w-3 h-3 fill-primary" />
-                            {game.average_score.toFixed(1)}
-                         </div>
-                      )}
-
-                      <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/20 to-transparent opacity-80 transition-opacity group-hover:opacity-60" />
-                    </div>
-
-                    <div className="absolute bottom-0 left-0 right-0 p-4 translate-y-2 group-hover:translate-y-0 transition-transform">
-                      <h3 className="font-bold text-white text-lg leading-tight line-clamp-2 group-hover:text-gaming-neon transition-colors font-sans">
-                        {game.name}
-                      </h3>
-                    </div>
-                  </div>
+                  <GameCard 
+                    key={game.id} 
+                    game={game} 
+                    onClick={handleGameClick} 
+                  />
                 ))}
                 
                 {!loading && games.length === 0 && (
