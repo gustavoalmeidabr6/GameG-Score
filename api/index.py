@@ -67,6 +67,7 @@ class Review(Base):
     game_id = Column(Integer, nullable=False, index=True) 
     game_name = Column(String) 
     game_image_url = Column(String, nullable=True)
+    game_video_id = Column(String, default="")
     genre = Column(String, nullable=True) 
     jogabilidade = Column(Float)
     graficos = Column(Float)
@@ -103,6 +104,18 @@ class TierlistLike(Base):
     id = Column(Integer, primary_key=True, index=True)
     user_id = Column(Integer, ForeignKey("users.id"))
     tierlist_id = Column(Integer, ForeignKey("tierlists.id"))
+
+class Follower(Base):
+    __tablename__ = "followers"
+    follower_id = Column(Integer, ForeignKey("users.id"), primary_key=True)
+    followed_id = Column(Integer, ForeignKey("users.id"), primary_key=True)
+
+class FriendRequest(Base):
+    __tablename__ = "friend_requests"
+    id = Column(Integer, primary_key=True, index=True)
+    sender_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    receiver_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    status = Column(String, default="pending") # pending, accepted
 
 # --- CONEXÃO COM O BANCO ---
 def get_db():
@@ -155,6 +168,7 @@ class ReviewInput(BaseModel):
     game_id: int
     game_name: str
     game_image_url: Optional[str] = "" 
+    game_video_id: Optional[str] = ""
     genre: Optional[str] = ""
     jogabilidade: float
     graficos: float
@@ -189,6 +203,14 @@ class LikeInput(BaseModel):
 class TierlistLikeInput(BaseModel):
     user_id: int
     tierlist_id: int
+
+class FollowInput(BaseModel):
+    follower_id: int
+    followed_id: int
+
+class FriendInput(BaseModel):
+    sender_id: int
+    target_id: int
 
 # ==============================================================================
 #  INTEGRAÇÃO IGDB
@@ -300,7 +322,7 @@ def search_games(q: str = None):
     if not headers: return [] 
 
     url = "https://api.igdb.com/v4/games"
-    body = f'search "{q}"; fields name, cover.url, genres.name, first_release_date; where cover != null; limit 20;'
+    body = f'search "{q}"; fields name, cover.url, genres.name, first_release_date, videos.video_id; where cover != null; limit 20;'
     
     try:
         response = requests.post(url, headers=headers, data=body)
@@ -311,7 +333,11 @@ def search_games(q: str = None):
             cover_url = ""
             if "cover" in game:
                 cover_url = format_igdb_image(game["cover"]["url"])
-                
+            
+            video_id = ""
+            if "videos" in game and len(game["videos"]) > 0:
+                video_id = game["videos"][0].get("video_id", "")
+
             results.append({
                 "id": game["id"],
                 "name": game["name"],
@@ -319,13 +345,14 @@ def search_games(q: str = None):
                     "medium_url": cover_url,
                     "thumb_url": cover_url
                 },
+                "video_id": video_id,
                 "release_date": game.get("first_release_date", "")
             })
         return results
     except Exception as e:
         print(f"Erro na busca IGDB: {e}")
         return []
-
+    
 @app.get("/api/game/{game_id}")
 def get_game(game_id: str, db: Session = Depends(get_db)):
     headers = get_igdb_headers()
@@ -653,7 +680,11 @@ def get_profile(user_id: int, db: Session = Depends(get_db)):
         "veteran": user.level >= 5
     }
     
+    followers_count = db.query(Follower).filter(Follower.followed_id == user_id).count()
+    following_count = db.query(Follower).filter(Follower.follower_id == user_id).count()
+
     return {
+        "id": user.id,
         "username": user.username,
         "nickname": user.nickname or user.username,
         "bio": user.bio,
@@ -661,6 +692,8 @@ def get_profile(user_id: int, db: Session = Depends(get_db)):
         "banner_url": user.banner_url,
         "xp": user.xp,
         "level": user.level,
+        "followers_count": followers_count,
+        "following_count": following_count,
         "stats": { 
             "reviews_count": review_count,
             "favorite_genre": favorite_genre,
@@ -772,10 +805,11 @@ def get_best_rated_games(db: Session = Depends(get_db)):
         Review.game_id,
         Review.game_name,
         Review.game_image_url,
+        Review.game_video_id,
         func.avg(Review.nota_geral).label("average_score"),
         func.count(Review.id).label("review_count")
     ).group_by(
-        Review.game_id, Review.game_name, Review.game_image_url
+        Review.game_id, Review.game_name, Review.game_image_url, Review.game_video_id
     )\
     .having(func.count(Review.id) >= 2) \
     .order_by(
@@ -789,6 +823,7 @@ def get_best_rated_games(db: Session = Depends(get_db)):
             "id": r.game_id,
             "name": r.game_name,
             "image": { "medium_url": r.game_image_url, "thumb_url": r.game_image_url },
+            "video_id": r.game_video_id,
             "average_score": r.average_score,
             "review_count": r.review_count
         })
@@ -889,7 +924,7 @@ def post_review(review_input: ReviewInput, db: Session = Depends(get_db)):
             if review_input.game_image_url: existing.game_image_url = review_input.game_image_url
             db.commit()
             return {"message": "Review atualizada!"}
-        new_review = Review(game_id=review_input.game_id, game_name=review_input.game_name, game_image_url=review_input.game_image_url, genre=review_input.genre, jogabilidade=review_input.jogabilidade, graficos=review_input.graficos, narrativa=review_input.narrativa, audio=review_input.audio, desempenho=review_input.desempenho, nota_geral=nota_geral, owner_id=review_input.owner_id)
+        new_review = Review(game_id=review_input.game_id, game_name=review_input.game_name, game_image_url=review_input.game_image_url, game_video_id=review_input.game_video_id, genre=review_input.genre, jogabilidade=review_input.jogabilidade, graficos=review_input.graficos, narrativa=review_input.narrativa, audio=review_input.audio, desempenho=review_input.desempenho, nota_geral=nota_geral, owner_id=review_input.owner_id)
         db.add(new_review)
         user = db.query(User).filter(User.id == review_input.owner_id).first()
         if user:
@@ -1057,7 +1092,137 @@ def set_favorites(input_data: FavoritesInput, db: Session = Depends(get_db)):
         db.rollback()
         return {"error": str(e)}
 
-# --- CONEXÕES / AMIGOS (COM CÁLCULO DE COMPATIBILIDADE) ---
+# --- ROTAS DE SEGUIR, SOCIAL E AMIGOS ---
+
+@app.post("/api/user/follow")
+def toggle_follow(data: FollowInput, db: Session = Depends(get_db)):
+    if data.follower_id == data.followed_id:
+        return {"error": "Não pode seguir a si mesmo"}
+    
+    existing = db.query(Follower).filter(Follower.follower_id == data.follower_id, Follower.followed_id == data.followed_id).first()
+    
+    if existing:
+        db.delete(existing)
+        db.commit()
+        return {"status": "unfollowed"}
+    else:
+        new_follow = Follower(follower_id=data.follower_id, followed_id=data.followed_id)
+        db.add(new_follow)
+        db.commit()
+        return {"status": "followed"}
+
+@app.get("/api/user/{user_id}/social_list")
+def get_social_list(user_id: int, db: Session = Depends(get_db)):
+    # 1. Seguidores
+    followers = db.query(User).join(Follower, Follower.follower_id == User.id).filter(Follower.followed_id == user_id).all()
+    
+    # 2. Seguindo
+    following = db.query(User).join(Follower, Follower.followed_id == User.id).filter(Follower.follower_id == user_id).all()
+    
+    # 3. Amigos (Tabela FriendRequest com status accepted)
+    # Amigos onde eu sou o sender
+    friends_sent = db.query(User).join(FriendRequest, FriendRequest.receiver_id == User.id).filter(
+        FriendRequest.sender_id == user_id, 
+        FriendRequest.status == "accepted"
+    ).all()
+    
+    # Amigos onde eu sou o receiver
+    friends_received = db.query(User).join(FriendRequest, FriendRequest.sender_id == User.id).filter(
+        FriendRequest.receiver_id == user_id, 
+        FriendRequest.status == "accepted"
+    ).all()
+    
+    friends_list = friends_sent + friends_received
+    
+    def format_user(u):
+        return {
+            "id": u.id,
+            "username": u.username,
+            "nickname": u.nickname or u.username,
+            "avatar_url": u.avatar_url,
+            "level": u.level
+        }
+
+    return {
+        "friends": [format_user(u) for u in friends_list],
+        "followers": [format_user(u) for u in followers],
+        "following": [format_user(u) for u in following]
+    }
+
+# --- ROTAS DE AMIZADE (ADD / REMOVE / ACCEPT) ---
+
+@app.get("/api/friend/status")
+def get_friendship_status(sender_id: int, target_id: int, db: Session = Depends(get_db)):
+    # Verifica se já existe solicitação em qualquer direção
+    req = db.query(FriendRequest).filter(
+        or_(
+            (FriendRequest.sender_id == sender_id) & (FriendRequest.receiver_id == target_id),
+            (FriendRequest.sender_id == target_id) & (FriendRequest.receiver_id == sender_id)
+        )
+    ).first()
+    
+    if not req:
+        return {"status": "none"}
+    
+    if req.status == "accepted":
+        return {"status": "friends"}
+    
+    if req.sender_id == sender_id:
+        return {"status": "pending_sent"}
+    else:
+        return {"status": "pending_received"}
+
+@app.post("/api/friend/request")
+def send_friend_request(data: FriendInput, db: Session = Depends(get_db)):
+    if data.sender_id == data.target_id: return {"error": "Mesmo usuário"}
+    
+    existing = db.query(FriendRequest).filter(
+        or_(
+            (FriendRequest.sender_id == data.sender_id) & (FriendRequest.receiver_id == data.target_id),
+            (FriendRequest.sender_id == data.target_id) & (FriendRequest.receiver_id == data.sender_id)
+        )
+    ).first()
+    
+    if existing:
+        if existing.status == "accepted": return {"message": "Já são amigos"}
+        return {"message": "Solicitação já existe"}
+    
+    new_req = FriendRequest(sender_id=data.sender_id, receiver_id=data.target_id, status="pending")
+    db.add(new_req)
+    db.commit()
+    return {"message": "Solicitação enviada"}
+
+@app.post("/api/friend/accept")
+def accept_friend_request(data: FriendInput, db: Session = Depends(get_db)):
+    # Aceitar significa que 'sender_id' (quem está chamando a API) está aceitando o pedido de 'target_id' (quem enviou)
+    # OU seja, na tabela, sender_id da row é o 'target_id' do payload, e receiver_id da row é 'sender_id' do payload
+    # Para facilitar, buscamos qualquer match pendente entre os dois
+    
+    req = db.query(FriendRequest).filter(
+        (FriendRequest.sender_id == data.target_id) & (FriendRequest.receiver_id == data.sender_id)
+    ).first()
+    
+    if not req: return {"error": "Solicitação não encontrada"}
+    
+    req.status = "accepted"
+    db.commit()
+    return {"message": "Agora vocês são amigos!"}
+
+@app.delete("/api/friend/remove")
+def remove_friend(sender_id: int, target_id: int, db: Session = Depends(get_db)):
+    req = db.query(FriendRequest).filter(
+        or_(
+            (FriendRequest.sender_id == sender_id) & (FriendRequest.receiver_id == target_id),
+            (FriendRequest.sender_id == target_id) & (FriendRequest.receiver_id == sender_id)
+        )
+    ).first()
+    
+    if req:
+        db.delete(req)
+        db.commit()
+    return {"message": "Removido"}
+
+# --- ROTA DE CONEXÕES / AMIGOS (COM CÁLCULO DE COMPATIBILIDADE) ---
 @app.get("/api/connections/{user_id}")
 def get_profile_connections(user_id: int, db: Session = Depends(get_db)):
     # 1. Busca todas as reviews do usuário alvo
