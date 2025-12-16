@@ -12,11 +12,24 @@ from typing import Optional, List, Dict, Any
 from datetime import datetime
 import urllib.parse
 from difflib import SequenceMatcher 
+import concurrent.futures
 
 from dotenv import load_dotenv
 load_dotenv()
 
 import bcrypt
+
+CACHE_EXPIRATION = 3600  # 1 hora em segundos
+
+upcoming_cache = {
+    "data": [],
+    "last_updated": 0
+}
+
+news_cache = {
+    "data": [],
+    "last_updated": 0
+}
 
 # --- CONFIGURAÇÃO DE SEGURANÇA (BCRYPT) ---
 def verify_password(plain_password, hashed_password):
@@ -35,7 +48,7 @@ def get_password_hash(password):
     return hashed.decode('utf-8')
 
 # --- CONFIGURAÇÃO DO BANCO DE DADOS (SQLALCHEMY) ---
-from sqlalchemy import create_engine, Column, Integer, String, Float, ForeignKey, desc, Boolean, Text, or_, func, distinct
+from sqlalchemy import create_engine, Column, Integer, String, Float, ForeignKey, desc, Boolean, Text, or_, func, distinct, text
 from sqlalchemy.orm import sessionmaker, declarative_base, Session
 
 engine = None
@@ -104,6 +117,14 @@ class TierlistLike(Base):
     id = Column(Integer, primary_key=True, index=True)
     user_id = Column(Integer, ForeignKey("users.id"))
     tierlist_id = Column(Integer, ForeignKey("tierlists.id"))
+
+class TierlistComment(Base):
+    __tablename__ = "tierlist_comments"
+    id = Column(Integer, primary_key=True, index=True)
+    tierlist_id = Column(Integer, ForeignKey("tierlists.id"), nullable=False, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"))
+    content = Column(Text, nullable=False)
+    created_at = Column(String, default=lambda: datetime.now().isoformat())
 
 class Follower(Base):
     __tablename__ = "followers"
@@ -203,6 +224,11 @@ class LikeInput(BaseModel):
 class TierlistLikeInput(BaseModel):
     user_id: int
     tierlist_id: int
+
+class TierlistCommentInput(BaseModel):
+    tierlist_id: int
+    user_id: int
+    content: str
 
 class FollowInput(BaseModel):
     follower_id: int
@@ -566,6 +592,12 @@ def toggle_tierlist_like(tierlist_id: int, like_data: TierlistLikeInput, db: Ses
 def dangerous_reset_db(db: Session = Depends(get_db)):
     try:
         global engine
+        # Passo extra: Forçar a exclusão da tabela antiga 'friendships' que está travando o banco
+        with engine.connect() as connection:
+            connection.execute(text("DROP TABLE IF EXISTS friendships CASCADE"))
+            connection.commit()
+            
+        # Agora roda o reset normal
         Base.metadata.drop_all(bind=engine)
         Base.metadata.create_all(bind=engine)
         return {"message": "SUCESSO: Banco resetado e tabelas atualizadas!"}
@@ -830,7 +862,7 @@ def get_best_rated_games(db: Session = Depends(get_db)):
     return games
 
 @app.get("/api/tierlist_public/{tierlist_id}")
-def get_single_tierlist(tierlist_id: int, db: Session = Depends(get_db)):
+def get_single_tierlist(tierlist_id: int, user_id: int = -1, db: Session = Depends(get_db)):
     tierlist = db.query(Tierlist).filter(Tierlist.id == tierlist_id).first()
     if not tierlist:
         raise HTTPException(status_code=404, detail="Tierlist não encontrada")
@@ -840,16 +872,50 @@ def get_single_tierlist(tierlist_id: int, db: Session = Depends(get_db)):
     except: loaded_data = {}
 
     owner = db.query(User).filter(User.id == tierlist.owner_id).first()
-    owner_name = owner.username if owner else "Desconhecido"
+    owner_data = {
+        "id": owner.id,
+        "username": owner.username,
+        "nickname": owner.nickname or owner.username,
+        "avatar_url": owner.avatar_url
+    } if owner else {"id": 0, "username": "Desconhecido", "nickname": "Desconhecido", "avatar_url": ""}
+
+    # Contagem de Likes
+    likes_count = db.query(TierlistLike).filter(TierlistLike.tierlist_id == tierlist_id).count()
+    
+    # Verifica se o usuário (se passado na query) deu like
+    user_has_liked = False
+    if user_id != -1:
+        if db.query(TierlistLike).filter(TierlistLike.tierlist_id == tierlist_id, TierlistLike.user_id == user_id).first():
+            user_has_liked = True
+
+    # Busca Comentários
+    comments_query = db.query(TierlistComment).filter(TierlistComment.tierlist_id == tierlist_id).order_by(desc(TierlistComment.created_at)).all()
+    comments_list = []
+    for c in comments_query:
+        c_author = db.query(User).filter(User.id == c.user_id).first()
+        comments_list.append({
+            "id": c.id,
+            "content": c.content,
+            "created_at": c.created_at,
+            "author": {
+                "id": c_author.id,
+                "nickname": c_author.nickname or c_author.username,
+                "avatar_url": c_author.avatar_url
+            } if c_author else {"nickname": "Desconhecido", "avatar_url": ""}
+        })
 
     return { 
         "id": tierlist.id, 
         "name": tierlist.name, 
         "data": loaded_data, 
         "owner_id": tierlist.owner_id,
-        "owner_name": owner_name
+        "owner": owner_data,
+        "likes_count": likes_count,
+        "user_has_liked": user_has_liked,
+        "comments": comments_list
     }
 
+# ESTA ROTA ESTAVA FALTANDO! ELA É A RESPONSÁVEL POR CRIAR A TIERLIST (POST)
 @app.post("/api/tierlist")
 def create_tierlist(tierlist_input: TierlistInput, db: Session = Depends(get_db)):
     try:
@@ -861,6 +927,28 @@ def create_tierlist(tierlist_input: TierlistInput, db: Session = Depends(get_db)
         db.rollback()
         return {"error": str(e)}
 
+@app.post("/api/tierlist/comment")
+def post_tierlist_comment(comment_data: TierlistCommentInput, db: Session = Depends(get_db)):
+    try:
+        new_comment = TierlistComment(
+            tierlist_id=comment_data.tierlist_id,
+            user_id=comment_data.user_id,
+            content=comment_data.content
+        )
+        db.add(new_comment)
+        db.commit()
+        
+        # Opcional: Dar XP para quem comentou
+        user = db.query(User).filter(User.id == comment_data.user_id).first()
+        if user:
+            user.xp += 15
+        db.commit()
+
+        return {"message": "Comentário enviado com sucesso!"}
+    except Exception as e:
+        db.rollback()
+        return {"error": str(e)}
+    
 @app.get("/api/tierlists/{user_id}")
 def get_tierlists(user_id: int, db: Session = Depends(get_db)):
     tierlists = db.query(Tierlist).filter(Tierlist.owner_id == user_id).all()
@@ -1456,84 +1544,6 @@ def generate_quiz(user_id: int, db: Session = Depends(get_db)):
 
     return questions[:10]
 # ==============================================================================
-#  NOVAS ROTAS: DADOS (Lançamentos e Notícias)
-# ==============================================================================
-
-@app.get("/api/games/upcoming")
-def get_upcoming_games():
-    headers = get_igdb_headers()
-    if not headers: return []
-
-    # Pega o timestamp atual para filtrar jogos futuros
-    current_time = int(time.time())
-    
-    url = "https://api.igdb.com/v4/games"
-    # Busca jogos com data de lançamento maior que hoje, ordenados por data
-    body = f'fields name, cover.url, first_release_date, summary, platforms.name, genres.name; where first_release_date > {current_time} & cover != null & platforms = (6,167,169,48,49,130); sort first_release_date asc; limit 12;'
-    
-    try:
-        response = requests.post(url, headers=headers, data=body)
-        games = response.json()
-        
-        results = []
-        for game in games:
-            cover_url = ""
-            if "cover" in game:
-                cover_url = format_igdb_image(game["cover"]["url"], "t_cover_big")
-            
-            platforms = [p["name"] for p in game.get("platforms", [])]
-            genres = [g["name"] for g in game.get("genres", [])]
-
-            results.append({
-                "id": game["id"],
-                "name": game["name"],
-                "image": cover_url,
-                "release_date": game.get("first_release_date"),
-                "summary": game.get("summary", "Sem descrição."),
-                "platforms": platforms[:3], # Limita a 3 plataformas para não poluir
-                "genres": genres[:2]
-            })
-        return results
-    except Exception as e:
-        print(f"Erro ao buscar lançamentos IGDB: {e}")
-        return []
-
-@app.get("/api/news/latest")
-def get_latest_news():
-    # Como a Steam News é por AppID, vamos pegar notícias de alguns jogos populares/relevantes
-    # IDs: 730 (CS2), 570 (Dota 2), 1086940 (Baldur's Gate 3), 1172470 (Apex), 271590 (GTA V)
-    target_app_ids = [1086940, 730, 570, 1172470, 1245620] # BG3, CS2, Dota2, Apex, Elden Ring
-    
-    all_news = []
-    
-    for app_id in target_app_ids:
-        try:
-            url = f"http://api.steampowered.com/ISteamNews/GetNewsForApp/v0002/?appid={app_id}&count=2&maxlength=300&format=json"
-            res = requests.get(url, timeout=2)
-            data = res.json()
-            
-            if "appnews" in data and "newsitems" in data["appnews"]:
-                items = data["appnews"]["newsitems"]
-                for item in items:
-                    # Limpa tags HTML básicas do conteúdo para ficar legível
-                    clean_content = re.sub('<[^<]+?>', '', item.get("contents", ""))
-                    
-                    all_news.append({
-                        "id": item.get("gid"),
-                        "title": item.get("title"),
-                        "url": item.get("url"),
-                        "author": item.get("author", "Steam"),
-                        "date": item.get("date"),
-                        "game_id": app_id,
-                        "content_snippet": clean_content[:150] + "..."
-                    })
-        except:
-            continue
-            
-    # Ordena todas as notícias por data (mais recente primeiro)
-    all_news.sort(key=lambda x: x["date"], reverse=True)
-    return all_news[:10]
-# ==============================================================================
 #  NOVAS ROTAS: DADOS (Lançamentos e Notícias com Tradução)
 # ==============================================================================
 
@@ -1554,10 +1564,15 @@ def safe_translate(text):
 
 @app.get("/api/games/upcoming")
 def get_upcoming_games():
+    global upcoming_cache
+    
+    # 1. Verifica Cache
+    current_time = int(time.time())
+    if upcoming_cache["data"] and (current_time - upcoming_cache["last_updated"] < CACHE_EXPIRATION):
+        return upcoming_cache["data"]
+
     headers = get_igdb_headers()
     if not headers: return []
-
-    current_time = int(time.time())
     
     # Busca lançamentos futuros
     url = "https://api.igdb.com/v4/games"
@@ -1568,6 +1583,8 @@ def get_upcoming_games():
         games = response.json()
         
         results = []
+        
+        # Função auxiliar para processar cada jogo (para usar com threads se quiser, ou simples aqui)
         for game in games:
             cover_url = ""
             if "cover" in game:
@@ -1576,7 +1593,7 @@ def get_upcoming_games():
             platforms = [p["name"] for p in game.get("platforms", [])]
             genres = [g["name"] for g in game.get("genres", [])]
 
-            # TRADUÇÃO INDIVIDUAL
+            # TRADUÇÃO (Isso é o que demora, então o cache é vital)
             original_summary = game.get("summary", "Sem descrição.")
             translated_summary = safe_translate(original_summary)
 
@@ -1589,6 +1606,11 @@ def get_upcoming_games():
                 "platforms": platforms[:3],
                 "genres": genres[:2]
             })
+        
+        # Atualiza Cache
+        upcoming_cache["data"] = results
+        upcoming_cache["last_updated"] = current_time
+        
         return results
     except Exception as e:
         print(f"Erro ao buscar lançamentos IGDB: {e}")
@@ -1596,28 +1618,36 @@ def get_upcoming_games():
 
 @app.get("/api/news/latest")
 def get_latest_news():
+    global news_cache
+    
+    # 1. Verifica Cache
+    current_time = int(time.time())
+    if news_cache["data"] and (current_time - news_cache["last_updated"] < CACHE_EXPIRATION):
+        return news_cache["data"]
+
     # IDs: BG3, CS2, Dota2, Apex, Elden Ring, GTA V
     target_app_ids = [1086940, 730, 570, 1172470, 1245620, 271590]
     
     raw_news = []
-    
-    for app_id in target_app_ids:
+
+    # Função interna para buscar e traduzir UMA notícia (será executada em paralelo)
+    def fetch_news_for_app(app_id):
         try:
-            # Pegando apenas 1 notícia de cada para ser mais rápido na tradução
             url = f"http://api.steampowered.com/ISteamNews/GetNewsForApp/v0002/?appid={app_id}&count=1&maxlength=300&format=json"
-            res = requests.get(url, timeout=2)
+            res = requests.get(url, timeout=5) # Timeout um pouco maior para garantir
             data = res.json()
             
             if "appnews" in data and "newsitems" in data["appnews"]:
                 items = data["appnews"]["newsitems"]
+                processed_items = []
                 for item in items:
                     clean_content = re.sub('<[^<]+?>', '', item.get("contents", ""))
                     
-                    # TRADUÇÃO DE TÍTULO E CONTEÚDO
+                    # Tradução
                     title_pt = safe_translate(item.get("title"))
                     content_pt = safe_translate(clean_content[:150] + "...")
 
-                    raw_news.append({
+                    processed_items.append({
                         "id": item.get("gid"),
                         "title": title_pt,
                         "url": item.get("url"),
@@ -1626,13 +1656,66 @@ def get_latest_news():
                         "game_id": app_id,
                         "content_snippet": content_pt
                     })
+                return processed_items
         except Exception as e:
             print(f"Erro ao buscar notícia app {app_id}: {e}")
-            continue
-            
+            return []
+        return []
+
+    # 2. Execução Paralela (ThreadPoolExecutor)
+    # Isso faz com que as 6 requisições aconteçam quase simultaneamente, não uma após a outra
+    with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
+        future_to_app = {executor.submit(fetch_news_for_app, app_id): app_id for app_id in target_app_ids}
+        
+        for future in concurrent.futures.as_completed(future_to_app):
+            try:
+                data = future.result()
+                if data:
+                    raw_news.extend(data)
+            except Exception as exc:
+                print(f'Erro na task de noticias: {exc}')
+
     # Ordena por data
     raw_news.sort(key=lambda x: x["date"], reverse=True)
+    
+    # Atualiza Cache
+    news_cache["data"] = raw_news
+    news_cache["last_updated"] = current_time
+
     return raw_news
+
+# --- ROTA PARA O MINIGAME DE CAPA (GUESS THE GAME) ---
+@app.get("/api/minigame/cover/{user_id}")
+def get_minigame_cover(user_id: int, db: Session = Depends(get_db)):
+    reviews = db.query(Review).filter(Review.owner_id == user_id).all()
+    
+    # Mínimo de 3 jogos para jogar
+    if len(reviews) < 3:
+        return []
+    
+    # Seleciona até 10 jogos aleatórios
+    selected_reviews = random.sample(reviews, min(len(reviews), 10))
+    
+    game_data = []
+    for r in selected_reviews:
+        # Gera uma dica baseada nas notas disponíveis
+        possible_hints = []
+        if r.nota_geral: possible_hints.append(f"O usuário deu nota TOTAL {r.nota_geral:.1f} para este jogo")
+        if r.narrativa: possible_hints.append(f"A nota de NARRATIVA foi {r.narrativa:.1f}")
+        if r.graficos: possible_hints.append(f"A nota de GRÁFICOS foi {r.graficos:.1f}")
+        if r.jogabilidade: possible_hints.append(f"A nota de JOGABILIDADE foi {r.jogabilidade:.1f}")
+        if r.audio: possible_hints.append(f"A nota de ÁUDIO foi {r.audio:.1f}")
+        
+        hint = random.choice(possible_hints) if possible_hints else "Jogo avaliado pelo usuário"
+        
+        game_data.append({
+            "id": r.game_id,
+            "name": r.game_name,
+            "cover": r.game_image_url,
+            "hint": hint
+        })
+        
+    return game_data
 
 if __name__ == "__main__":
     import uvicorn
