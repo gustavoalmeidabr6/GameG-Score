@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Menu, Home, User, BarChart3, List, LogOut, Users } from "lucide-react";
+import { Menu, Home, User, BarChart3, List, LogOut, Users, Globe } from "lucide-react"; // ADICIONADO: Globe
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -16,7 +16,8 @@ export const NavigationMenu = () => {
   const menuItems = [
     { icon: Home, label: "Tela Principal", href: "/home" },
     { icon: User, label: "Perfil", href: "/profile" },
-    { icon: Users, label: "Comunidade", href: "/community" }, // NOVO ITEM
+    { icon: Users, label: "Comunidade", href: "/community" },
+    { icon: Globe, label: "Game Hub", href: "/hub" }, // NOVO ITEM ADICIONADO AQUI
     { icon: BarChart3, label: "Estatísticas", href: "/statistics" },
     { icon: List, label: "Tierlist", href: "/tierlist" },
     { icon: LogOut, label: "Sair", href: "/", isLogout: true },
