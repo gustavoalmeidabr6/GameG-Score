@@ -13,8 +13,9 @@ import Profile from "./pages/Profile";
 import Statistics from "./pages/Statistics";
 import Tierlist from "./pages/Tierlist";
 import Community from "./pages/Community";
+import Dados from "./pages/Dados"; // IMPORTAÇÃO DA NOVA PÁGINA
 import NotFound from "./pages/NotFound";
-import ProtectedRoute from "@/components/ProtectedRoute"; // <--- IMPORTAMOS O GUARDA
+import ProtectedRoute from "@/components/ProtectedRoute"; 
 
 const queryClient = new QueryClient();
 
@@ -42,6 +43,7 @@ const App = () => (
             <Route path="/statistics" element={<Statistics />} />
             <Route path="/tierlist" element={<Tierlist />} />
             <Route path="/community" element={<Community />} />
+            <Route path="/hub" element={<Dados />} /> {/* NOVA ROTA ADICIONADA AQUI */}
           </Route>
           
           {/* Rota de Erro 404 */}
