@@ -1,5 +1,5 @@
 import { Badge } from "@/components/ui/badge";
-import { Crown, Zap, Quote } from "lucide-react"; // Adicionei o ícone Quote
+import { Crown, Zap, Quote, Users } from "lucide-react"; 
 import defaultBanner from "@/assets/BANNER1.png";
 import defaultAvatar from "@/assets/defaultprofile.png";
 
@@ -10,10 +10,11 @@ interface ProfileHeaderProps {
   avatarUrl: string;
   bannerUrl?: string;
   xp: number;
-  bio?: string; // Adicionado a propriedade Bio
+  followersCount?: number; // Nova propriedade
+  bio?: string;
 }
 
-export const ProfileHeader = ({ username, level, avatarUrl, bannerUrl, xp, bio }: ProfileHeaderProps) => {
+export const ProfileHeader = ({ username, level, avatarUrl, bannerUrl, xp, bio, followersCount }: ProfileHeaderProps) => {
   
   // --- LÓGICA DE RANKS (Mantida igual) ---
   const getRankInfo = (currentXp: number) => {
@@ -100,6 +101,17 @@ export const ProfileHeader = ({ username, level, avatarUrl, bannerUrl, xp, bio }
                 />
               </div>
             </div>
+
+            {/* CONTADOR DE SEGUIDORES (NOVO) */}
+            <div className="flex justify-center mt-2 w-full">
+                <div className="flex items-center gap-2 bg-black/60 border border-white/10 px-3 py-1 rounded-full backdrop-blur-sm">
+                    <Users className="w-3 h-3 text-primary" />
+                    <span className="text-[10px] font-bold text-white uppercase tracking-widest">
+                        {followersCount || 0} Seguidores
+                    </span>
+                </div>
+            </div>
+
           </div>
         </div>
 
