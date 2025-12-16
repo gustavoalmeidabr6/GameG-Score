@@ -100,15 +100,23 @@ const GameCard = ({ game, onClick }: { game: GameSearchResult; onClick: (id: num
 const Index = () => {
   const [query, setQuery] = useState("");
   const [games, setGames] = useState<GameSearchResult[]>([]);
-  const [loading, setLoading] = useState(false);
+  // Usei 'loadingGames' para diferenciar do carregamento inicial da página
+  const [loadingGames, setLoadingGames] = useState(false); 
   const [username, setUsername] = useState("Visitante");
   const [isSearching, setIsSearching] = useState(false);
   const [userProfile, setUserProfile] = useState<any>(null);
   
+  // ESTADO NOVO: Controla a tela preta inicial
+  const [isInitializing, setIsInitializing] = useState(true);
+  
   const navigate = useNavigate();
 
   useEffect(() => {
-    const fetchUserData = async () => {
+    const initializePage = async () => {
+      // 1. Carregar Jogos (pode acontecer em paralelo, não bloqueamos o fetch)
+      loadBestRatedGames();
+
+      // 2. Verificar Usuário (Bloqueante)
       const userId = localStorage.getItem("userId");
       if (userId) {
         try {
@@ -119,20 +127,22 @@ const Index = () => {
             setUsername(data.username);
           } else {
             console.warn("Sessão inválida detectada.");
-            localStorage.removeItem("userId"); // Apenas remove o ID se inválido
+            localStorage.removeItem("userId");
           }
         } catch (error) {
           console.error("Erro ao carregar perfil na home:", error);
         }
       }
+      
+      // Remove a tela preta após tentar carregar o usuário
+      setIsInitializing(false);
     };
 
-    fetchUserData();
-    loadBestRatedGames(); 
+    initializePage();
   }, []);
 
   const loadBestRatedGames = async () => {
-    setLoading(true);
+    setLoadingGames(true);
     setIsSearching(false);
 
     try {
@@ -145,13 +155,13 @@ const Index = () => {
       console.error("Erro geral ao carregar jogos:", error);
       toast.error("Erro ao carregar lista de jogos.");
     } finally {
-      setLoading(false);
+      setLoadingGames(false);
     }
   };
 
   const searchGames = async (searchTerm: string) => {
     if (!searchTerm) return;
-    setLoading(true);
+    setLoadingGames(true);
     setIsSearching(true);
     try {
       const response = await fetch(`/api/search?q=${searchTerm}`);
@@ -163,7 +173,7 @@ const Index = () => {
       console.error("Erro ao buscar jogos:", error);
       toast.error("Falha na busca.");
     } finally {
-      setLoading(false);
+      setLoadingGames(false);
     }
   };
 
@@ -180,6 +190,11 @@ const Index = () => {
   const handleGameClick = (id: number) => {
     navigate(`/game/${id}`);
   };
+
+  // Se estiver inicializando, mostra tela preta
+  if (isInitializing) {
+    return <div className="min-h-screen bg-black" />;
+  }
 
   return (
     <div className="min-h-screen relative pb-12 font-sans">
@@ -206,9 +221,12 @@ const Index = () => {
             avatarUrl={userProfile?.avatar_url || ""} 
             bannerUrl={userProfile?.banner_url}
             bio={userProfile?.bio}
-            followersCount={userProfile?.followers_count || 0} // PASSANDO OS SEGUIDORES AQUI
+            followersCount={userProfile?.followers_count || 0} 
+            // Corrigido a lógica de logout para não quebrar a página sem refresh
             onLogout={() => {
                localStorage.removeItem("userId");
+               setUserProfile(null);
+               setUsername("Visitante");
                navigate("/");
             }}
           />
@@ -235,7 +253,7 @@ const Index = () => {
             <div className="space-y-6">
               <div className="relative inline-block">
                 <h2 className="text-3xl md:text-4xl font-black text-primary uppercase tracking-widest neon-text font-pixel">
-                  {loading ? "CARREGANDO..." : (isSearching ? "RESULTADOS DA BUSCA" : "MAIS BEM AVALIADOS")}
+                  {loadingGames ? "CARREGANDO..." : (isSearching ? "RESULTADOS DA BUSCA" : "MAIS BEM AVALIADOS")}
                 </h2>
                 <div className="absolute -bottom-2 left-0 right-0 h-1 bg-gradient-to-r from-primary via-gaming-glow to-primary neon-glow" />
               </div>
@@ -249,7 +267,7 @@ const Index = () => {
                   />
                 ))}
                 
-                {!loading && games.length === 0 && (
+                {!loadingGames && games.length === 0 && (
                   <div className="col-span-full text-center py-20">
                     <p className="text-gray-400 text-lg mb-2">
                        {isSearching ? "Nenhum jogo encontrado." : "Ainda não há avaliações na comunidade."}
