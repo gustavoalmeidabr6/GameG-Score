@@ -10,7 +10,7 @@ interface ProfileHeaderProps {
   avatarUrl: string;
   bannerUrl?: string;
   xp: number;
-  followersCount?: number; // Nova propriedade
+  followersCount?: number; 
   bio?: string;
 }
 
@@ -53,11 +53,12 @@ export const ProfileHeader = ({ username, level, avatarUrl, bannerUrl, xp, bio, 
         <div className="absolute inset-0 bg-gradient-to-t from-black via-black/50 to-transparent" />
 
         {/* Conteúdo Central */}
-        <div className="relative flex flex-col md:flex-row items-center justify-center gap-6 px-8 py-8 md:py-10 z-10">
+        {/* ALTERAÇÃO AQUI: Usando Grid para garantir centralização exata do avatar */}
+        <div className="relative grid grid-cols-1 md:grid-cols-[1fr_auto_1fr] items-center gap-6 px-8 py-8 md:py-10 z-10 w-full">
           
           {/* Esquerda: Username & Level */}
-          <div className="flex flex-col items-center md:items-end gap-2 min-w-[180px]">
-            <span className="text-xl md:text-2xl font-black text-white drop-shadow-lg uppercase tracking-wider font-pixel text-center md:text-right">
+          <div className="flex flex-col items-center md:items-end gap-2 w-full">
+            <span className="text-xl md:text-2xl font-black text-white drop-shadow-lg uppercase tracking-wider font-pixel text-center md:text-right break-words max-w-full leading-tight">
               {username}
             </span>
             <Badge variant="outline" className="border-primary bg-black/60 text-primary text-xs font-pixel px-3 py-1 backdrop-blur-md shadow-lg">
@@ -66,17 +67,19 @@ export const ProfileHeader = ({ username, level, avatarUrl, bannerUrl, xp, bio, 
           </div>
 
           {/* Centro: Avatar */}
-          <div className="relative flex-shrink-0">
-            <div className="absolute inset-0 rounded-full bg-primary/20 blur-2xl scale-110" />
-            <img
-              src={avatarUrl || defaultAvatar}
-              alt={username}
-              className="relative w-28 h-28 md:w-32 md:h-32 rounded-full border-4 border-primary/50 ring-4 ring-primary/20 ring-offset-4 ring-offset-transparent shadow-[0_0_40px_hsl(var(--primary)/0.6)] object-cover bg-black"
-            />
+          <div className="relative flex-shrink-0 flex justify-center">
+            <div className="relative">
+                <div className="absolute inset-0 rounded-full bg-primary/20 blur-2xl scale-110" />
+                <img
+                src={avatarUrl || defaultAvatar}
+                alt={username}
+                className="relative w-28 h-28 md:w-32 md:h-32 rounded-full border-4 border-primary/50 ring-4 ring-primary/20 ring-offset-4 ring-offset-transparent shadow-[0_0_40px_hsl(var(--primary)/0.6)] object-cover bg-black"
+                />
+            </div>
           </div>
 
           {/* Direita: Rank & XP */}
-          <div className="flex flex-col items-center md:items-start gap-2 min-w-[180px]">
+          <div className="flex flex-col items-center md:items-start gap-2 w-full">
             <div className="flex items-center gap-2 glass-panel px-4 py-2 rounded-lg border border-primary/30 bg-black/60 backdrop-blur-md shadow-lg">
               <Crown className={`h-5 w-5 ${currentRank.color}`} />
               <div className="flex flex-col">
@@ -102,8 +105,8 @@ export const ProfileHeader = ({ username, level, avatarUrl, bannerUrl, xp, bio, 
               </div>
             </div>
 
-            {/* CONTADOR DE SEGUIDORES (NOVO) */}
-            <div className="flex justify-center mt-2 w-full">
+            {/* CONTADOR DE SEGUIDORES */}
+            <div className="flex justify-center md:justify-start w-full md:w-auto mt-2">
                 <div className="flex items-center gap-2 bg-black/60 border border-white/10 px-3 py-1 rounded-full backdrop-blur-sm">
                     <Users className="w-3 h-3 text-primary" />
                     <span className="text-[10px] font-bold text-white uppercase tracking-widest">
@@ -119,10 +122,10 @@ export const ProfileHeader = ({ username, level, avatarUrl, bannerUrl, xp, bio, 
         {bio && (
             <div className="relative z-10 w-full px-6 pb-6 pt-2 text-center">
                  <div className="inline-block bg-black/40 backdrop-blur-md border border-white/10 rounded-xl px-6 py-3 max-w-2xl shadow-lg">
-                    <p className="text-gray-200 text-sm italic font-medium flex items-center justify-center gap-2">
-                        <Quote className="w-3 h-3 text-primary rotate-180 mb-2" />
-                        {bio}
-                        <Quote className="w-3 h-3 text-primary mt-2" />
+                    <p className="text-gray-200 text-sm italic font-medium flex items-center justify-center gap-2 break-words">
+                        <Quote className="w-3 h-3 text-primary rotate-180 mb-2 flex-shrink-0" />
+                        <span>{bio}</span>
+                        <Quote className="w-3 h-3 text-primary mt-2 flex-shrink-0" />
                     </p>
                  </div>
             </div>
