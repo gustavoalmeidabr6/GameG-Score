@@ -37,8 +37,9 @@ const App = () => (
             <Route path="/home" element={<Index />} />
             <Route path="/game/:id" element={<GameDetails />} />
             
+            {/* MUDANÇA AQUI: de :userId para :username */}
             <Route path="/profile" element={<Profile />} />
-            <Route path="/profile/:userId" element={<Profile />} />
+            <Route path="/profile/:username" element={<Profile />} />
             
             <Route path="/statistics" element={<Statistics />} />
             <Route path="/tierlist" element={<Tierlist />} />
