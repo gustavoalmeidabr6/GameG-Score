@@ -48,7 +48,8 @@ type QuizStage = {
 
 export default function Profile() {
   const navigate = useNavigate();
-  const { userId } = useParams(); 
+  // ALTERAÇÃO: Mudado de userId para username para casar com a rota nova
+  const { username } = useParams(); 
   
   const [profile, setProfile] = useState<any>(null);
   
@@ -110,36 +111,46 @@ export default function Profile() {
       return;
     }
 
-    const targetId = userId || loggedUserId;
-    setIsOwner(targetId === loggedUserId);
+    // ALTERAÇÃO: O identificador pode ser o username da URL ou o ID do usuário logado
+    const targetIdentifier = username || loggedUserId;
+    
     setLoadingProfile(true); 
 
     try {
-      // 1. PRIORITY FETCH
-      const response = await fetch(`/api/profile/${targetId}`);
+      // 1. PRIORITY FETCH: Busca o perfil usando Username ou ID
+      const response = await fetch(`/api/profile/${targetIdentifier}`);
       if (response.status === 404) {
         toast.error("Usuário não encontrado.");
         navigate("/home");
         return;
       }
       
+      let realId = 0; // Precisamos descobrir o ID numérico para as outras buscas
+
       if (response.ok) {
         const data = await response.json();
         setProfile(data);
-        setFollowersCount(data.followers_count || 0); // Atualiza contador
+        realId = data.id; // Captura o ID real do banco
+        
+        // Verifica owner comparando IDs
+        setIsOwner(String(data.id) === String(loggedUserId));
+        
+        setFollowersCount(data.followers_count || 0); 
         setLoadingProfile(false); 
+      } else {
+        return; // Se falhou o perfil, não carrega o resto
       }
 
-      // 2. BACKGROUND FETCH
+      // 2. BACKGROUND FETCH (Usa o realId numérico obtido acima)
       setLoadingSecondary(true);
       
       const [gamesRes, tierRes, bestCommentRes, allCommentsRes, connRes, socialRes] = await Promise.all([
-        fetch(`/api/user_games/${targetId}`),
-        fetch(`/api/tierlists/${targetId}`),
-        fetch(`/api/user/${targetId}/best_comment`),
-        fetch(`/api/user/${targetId}/comments`),
-        fetch(`/api/connections/${targetId}`),
-        fetch(`/api/user/${targetId}/social_list`) 
+        fetch(`/api/user_games/${realId}`),
+        fetch(`/api/tierlists/${realId}`),
+        fetch(`/api/user/${realId}/best_comment`),
+        fetch(`/api/user/${realId}/comments`),
+        fetch(`/api/connections/${realId}`),
+        fetch(`/api/user/${realId}/social_list`) 
       ]);
 
       if (gamesRes.ok) {
@@ -167,8 +178,8 @@ export default function Profile() {
       }
 
       // 3. FETCH FRIEND STATUS
-      if (loggedUserId && targetId !== loggedUserId) {
-          const fsRes = await fetch(`/api/friend/status?sender_id=${loggedUserId}&target_id=${targetId}`);
+      if (loggedUserId && String(realId) !== String(loggedUserId)) {
+          const fsRes = await fetch(`/api/friend/status?sender_id=${loggedUserId}&target_id=${realId}`);
           if (fsRes.ok) {
               const fsData = await fsRes.json();
               setFriendStatus(fsData.status);
@@ -176,8 +187,8 @@ export default function Profile() {
       }
 
       // 4. FETCH PENDING REQUESTS (SE FOR O DONO)
-      if (loggedUserId && targetId === loggedUserId) {
-          const pendingRes = await fetch(`/api/user/${targetId}/pending_requests`);
+      if (loggedUserId && String(realId) === String(loggedUserId)) {
+          const pendingRes = await fetch(`/api/user/${realId}/pending_requests`);
           if (pendingRes.ok) {
               setPendingRequests(await pendingRes.json());
           }
@@ -185,7 +196,7 @@ export default function Profile() {
 
       // 5. FETCH QUIZ AVANÇADO
       setQuizLoading(true);
-      fetch(`/api/quiz/${targetId}`)
+      fetch(`/api/quiz/${realId}`)
         .then(res => res.json())
         .then(data => {
             if (!data.error && Array.isArray(data)) {
@@ -196,7 +207,7 @@ export default function Profile() {
         .finally(() => setQuizLoading(false));
 
       // 6. FETCH COVER MINIGAME DATA
-      fetch(`/api/minigame/cover/${targetId}`)
+      fetch(`/api/minigame/cover/${realId}`)
         .then(res => res.json())
         .then(data => {
             if (Array.isArray(data) && data.length >= 3) {
@@ -216,7 +227,7 @@ export default function Profile() {
 
   useEffect(() => {
     fetchProfile();
-  }, [navigate, userId]); 
+  }, [navigate, username]); // Dependência atualizada para username
 
   // --- AÇÃO DE SEGUIR ---
   const handleFollowToggle = async () => {
@@ -624,7 +635,7 @@ export default function Profile() {
                 </h3>
                 <div className="flex gap-4 overflow-x-auto pb-2 scrollbar-hide">
                     {connections.map((friend: any) => (
-                        <Link to={`/profile/${friend.id}`} key={friend.id} className="min-w-[180px] bg-black/40 border border-white/5 p-3 rounded-lg flex items-center gap-3 hover:border-primary/40 hover:bg-white/5 transition-all">
+                        <Link to={`/profile/${friend.username}`} key={friend.id} className="min-w-[180px] bg-black/40 border border-white/5 p-3 rounded-lg flex items-center gap-3 hover:border-primary/40 hover:bg-white/5 transition-all">
                             <div className="relative">
                                 <Avatar className="h-10 w-10 border border-white/10">
                                     <AvatarImage src={friend.avatar_url} />
@@ -961,14 +972,14 @@ export default function Profile() {
                                 {pendingRequests.map((req: any) => (
                                     <div key={req.request_id} className="bg-black/40 border border-white/10 p-4 rounded-lg flex items-center justify-between gap-4">
                                         <div className="flex items-center gap-3 overflow-hidden">
-                                            <Link to={`/profile/${req.sender_id}`}>
+                                            <Link to={`/profile/${req.username}`}>
                                                 <Avatar className="h-10 w-10 border border-white/10 hover:border-primary transition-colors">
                                                     <AvatarImage src={req.avatar_url} />
                                                     <AvatarFallback>{req.username[0]}</AvatarFallback>
                                                 </Avatar>
                                             </Link>
                                             <div className="flex flex-col overflow-hidden">
-                                                <Link to={`/profile/${req.sender_id}`} className="font-bold text-white text-sm hover:text-primary truncate">
+                                                <Link to={`/profile/${req.username}`} className="font-bold text-white text-sm hover:text-primary truncate">
                                                     {req.nickname || req.username}
                                                 </Link>
                                                 <span className="text-xs text-gray-500">Quer ser seu amigo</span>
@@ -1007,7 +1018,7 @@ export default function Profile() {
                     </h3>
                     <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
                         {socialData.friends.length > 0 ? socialData.friends.map((u: any) => (
-                            <Link to={`/profile/${u.id}`} key={u.id} className="bg-[#1a1c1f] p-3 rounded-lg flex items-center gap-3 border border-white/5 hover:border-primary/50 transition-all">
+                            <Link to={`/profile/${u.username}`} key={u.id} className="bg-[#1a1c1f] p-3 rounded-lg flex items-center gap-3 border border-white/5 hover:border-primary/50 transition-all">
                                 <Avatar className="h-8 w-8">
                                     <AvatarImage src={u.avatar_url} />
                                     <AvatarFallback>{u.username[0]}</AvatarFallback>
@@ -1025,7 +1036,7 @@ export default function Profile() {
                     </h3>
                     <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
                         {socialData.followers.length > 0 ? socialData.followers.map((u: any) => (
-                            <Link to={`/profile/${u.id}`} key={u.id} className="bg-[#1a1c1f] p-3 rounded-lg flex items-center gap-3 border border-white/5 hover:border-white/20 transition-all">
+                            <Link to={`/profile/${u.username}`} key={u.id} className="bg-[#1a1c1f] p-3 rounded-lg flex items-center gap-3 border border-white/5 hover:border-white/20 transition-all">
                                 <Avatar className="h-8 w-8">
                                     <AvatarImage src={u.avatar_url} />
                                     <AvatarFallback>{u.username[0]}</AvatarFallback>
