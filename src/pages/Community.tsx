@@ -64,7 +64,8 @@ export default function Community() {
     return () => clearTimeout(delayDebounceFn);
   }, [query]);
 
-  const handleViewProfile = (userId: number) => navigate(`/profile/${userId}`); 
+  // ALTERAÇÃO AQUI: Agora recebe uma string (username) em vez de number (id)
+  const handleViewProfile = (username: string) => navigate(`/profile/${username}`); 
 
   const handleLikeTierlist = async (e: React.MouseEvent, tierlistId: number) => {
     e.stopPropagation(); // Evita navegar ao clicar no like
@@ -173,7 +174,8 @@ export default function Community() {
                         {topUsers.map((user, index) => (
                         <div 
                             key={user.id}
-                            onClick={() => handleViewProfile(user.id)}
+                            // ALTERAÇÃO: Passando user.username
+                            onClick={() => handleViewProfile(user.username)}
                             className="flex items-center gap-4 p-4 glass-panel rounded-xl border border-white/5 hover:border-yellow-500/50 transition-all cursor-pointer bg-black/40"
                         >
                             <div className="w-8 flex justify-center">{getRankIcon(index)}</div>
@@ -205,7 +207,8 @@ export default function Community() {
                         {users.map((user) => (
                         <div 
                             key={user.id}
-                            onClick={() => handleViewProfile(user.id)}
+                            // ALTERAÇÃO: Passando user.username
+                            onClick={() => handleViewProfile(user.username)}
                             className="flex items-center gap-3 p-3 glass-panel rounded-lg border border-white/5 hover:border-primary transition-all cursor-pointer bg-black/40"
                         >
                             <Avatar className="w-10 h-10 border border-white/10">
@@ -249,7 +252,8 @@ export default function Community() {
                                 
                                 <div 
                                     className="flex items-center gap-2 text-sm text-gray-400 mb-4 cursor-pointer hover:text-white transition-colors"
-                                    onClick={() => handleViewProfile(tier.author.id)}
+                                    // ALTERAÇÃO: Passando tier.author.username
+                                    onClick={() => handleViewProfile(tier.author.username)}
                                 >
                                     <Avatar className="w-6 h-6 border border-white/10">
                                         <AvatarImage src={tier.author.avatar_url || defaultAvatar} />
@@ -289,7 +293,8 @@ export default function Community() {
                     {topComments.map((comment) => (
                         <div key={comment.id} className="glass-panel p-6 rounded-xl border border-white/5 hover:border-primary/30 transition-all bg-black/40">
                             <div className="flex justify-between items-start mb-3">
-                                <div className="flex items-center gap-2 cursor-pointer group" onClick={() => handleViewProfile(comment.author.id)}>
+                                {/* ALTERAÇÃO: Passando comment.author.username */}
+                                <div className="flex items-center gap-2 cursor-pointer group" onClick={() => handleViewProfile(comment.author.username)}>
                                     <Avatar className="w-8 h-8 border border-white/10 group-hover:border-primary">
                                         <AvatarImage src={comment.author.avatar_url || defaultAvatar} />
                                         <AvatarFallback>U</AvatarFallback>
