@@ -626,10 +626,28 @@ def login(user_login: UserLogin, db: Session = Depends(get_db)):
         raise HTTPException(status_code=400, detail="Senha incorreta")
     return {"message": "Login OK", "user_id": user.id, "username": user.username}
 
-@app.get("/api/profile/{user_id}")
-def get_profile(user_id: int, db: Session = Depends(get_db)):
-    user = db.query(User).filter(User.id == user_id).first()
-    if not user: raise HTTPException(status_code=404, detail="Usuário não encontrado")
+# No arquivo index.py, procure por @app.get("/api/profile/{user_id}") e substitua por:
+
+@app.get("/api/profile/{identifier}")
+def get_profile(identifier: str, db: Session = Depends(get_db)):
+    # Tenta buscar o usuário
+    user = None
+    
+    # Se for puramente numérico, tenta buscar pelo ID primeiro
+    if identifier.isdigit():
+        user = db.query(User).filter(User.id == int(identifier)).first()
+    
+    # Se não achou pelo ID (ou não era número), busca pelo username
+    if not user:
+        # Busca por username (case insensitive é melhor para UX, mas aqui manteremos exato ou ilike)
+        user = db.query(User).filter(User.username == identifier).first()
+
+    if not user: 
+        raise HTTPException(status_code=404, detail="Usuário não encontrado")
+    
+    user_id = user.id # Pegamos o ID real do usuário encontrado
+
+    # --- O RESTO DA FUNÇÃO PERMANECE IGUAL, APENAS USE user_id ONDE ERA USADO ANTES ---
     
     all_reviews = db.query(Review).filter(Review.owner_id == user_id).all()
     review_count = len(all_reviews)
@@ -1280,17 +1298,62 @@ def send_friend_request(data: FriendInput, db: Session = Depends(get_db)):
     db.commit()
     return {"message": "Solicitação enviada"}
 
+# --- ADICIONE ESTA ROTA QUE ESTAVA FALTANDO ---
+@app.get("/api/user/{user_id}/pending_requests")
+def get_pending_requests(user_id: int, db: Session = Depends(get_db)):
+    # Busca solicitações onde EU sou o recebedor (receiver_id) e status é 'pending'
+    requests = db.query(FriendRequest).filter(
+        FriendRequest.receiver_id == user_id,
+        FriendRequest.status == "pending"
+    ).all()
+    
+    results = []
+    for req in requests:
+        sender = db.query(User).filter(User.id == req.sender_id).first()
+        if sender:
+            results.append({
+                "request_id": req.id,
+                "sender_id": sender.id,
+                "username": sender.username,
+                "nickname": sender.nickname or sender.username,
+                "avatar_url": sender.avatar_url
+            })
+    return results
+
+
+
+# --- ADICIONE ESTA ROTA QUE ESTAVA FALTANDO ---
+@app.get("/api/user/{user_id}/pending_requests")
+def get_pending_requests(user_id: int, db: Session = Depends(get_db)):
+    # Busca solicitações onde EU sou o recebedor (receiver_id) e status é 'pending'
+    requests = db.query(FriendRequest).filter(
+        FriendRequest.receiver_id == user_id,
+        FriendRequest.status == "pending"
+    ).all()
+    
+    results = []
+    for req in requests:
+        sender = db.query(User).filter(User.id == req.sender_id).first()
+        if sender:
+            results.append({
+                "request_id": req.id,
+                "sender_id": sender.id,
+                "username": sender.username,
+                "nickname": sender.nickname or sender.username,
+                "avatar_url": sender.avatar_url
+            })
+    return results
+
 @app.post("/api/friend/accept")
 def accept_friend_request(data: FriendInput, db: Session = Depends(get_db)):
-    # Aceitar significa que 'sender_id' (quem está chamando a API) está aceitando o pedido de 'target_id' (quem enviou)
-    # OU seja, na tabela, sender_id da row é o 'target_id' do payload, e receiver_id da row é 'sender_id' do payload
-    # Para facilitar, buscamos qualquer match pendente entre os dois
-    
+    # Procura o pedido onde o remetente é quem enviou (sender_id) e o destinatário sou eu (target_id)
     req = db.query(FriendRequest).filter(
-        (FriendRequest.sender_id == data.target_id) & (FriendRequest.receiver_id == data.sender_id)
+        (FriendRequest.sender_id == data.sender_id) & 
+        (FriendRequest.receiver_id == data.target_id)
     ).first()
     
-    if not req: return {"error": "Solicitação não encontrada"}
+    if not req: 
+        raise HTTPException(status_code=404, detail="Solicitação não encontrada")
     
     req.status = "accepted"
     db.commit()
@@ -1298,6 +1361,7 @@ def accept_friend_request(data: FriendInput, db: Session = Depends(get_db)):
 
 @app.delete("/api/friend/remove")
 def remove_friend(sender_id: int, target_id: int, db: Session = Depends(get_db)):
+    # Procura a relação em qualquer direção para deletar (serve para recusar ou desfazer amizade)
     req = db.query(FriendRequest).filter(
         or_(
             (FriendRequest.sender_id == sender_id) & (FriendRequest.receiver_id == target_id),
@@ -1308,7 +1372,9 @@ def remove_friend(sender_id: int, target_id: int, db: Session = Depends(get_db))
     if req:
         db.delete(req)
         db.commit()
-    return {"message": "Removido"}
+        return {"message": "Removido"}
+    
+    raise HTTPException(status_code=404, detail="Solicitação não encontrada")
 
 # --- ROTA DE CONEXÕES / AMIGOS (COM CÁLCULO DE COMPATIBILIDADE) ---
 @app.get("/api/connections/{user_id}")
@@ -1562,58 +1628,128 @@ def safe_translate(text):
         print(f"Erro ao traduzir trecho: {e}")
         return text
 
+# --- SUBSTITUA A FUNÇÃO get_upcoming_games POR ESTA ---
+
 @app.get("/api/games/upcoming")
 def get_upcoming_games():
     global upcoming_cache
     
-    # 1. Verifica Cache
+    # 1. Verifica Cache (1 hora)
     current_time = int(time.time())
     if upcoming_cache["data"] and (current_time - upcoming_cache["last_updated"] < CACHE_EXPIRATION):
         return upcoming_cache["data"]
 
-    headers = get_igdb_headers()
-    if not headers: return []
-    
-    # Busca lançamentos futuros
-    url = "https://api.igdb.com/v4/games"
-    body = f'fields name, cover.url, first_release_date, summary, platforms.name, genres.name; where first_release_date > {current_time} & cover != null & platforms = (6,167,169,48,49,130); sort first_release_date asc; limit 12;'
-    
     try:
-        response = requests.post(url, headers=headers, data=body)
-        games = response.json()
+        # Busca a lista oficial de "Em Breve" da Steam
+        url = "https://store.steampowered.com/api/featuredcategories?cc=BR&l=portuguese"
+        response = requests.get(url, timeout=10)
+        data = response.json()
         
+        items = []
+        if "coming_soon" in data:
+            items = data["coming_soon"]["items"]
+        
+        # REMOVIDO: Fallback para 'top_sellers' (causava o bug de mostrar jogos atuais)
+
+        # Pega IDs dos top 20 para filtrar (pegamos mais para poder descartar os ruins)
+        target_ids = [item["id"] for item in items[:25]]
+        
+        if not target_ids:
+            return []
+
+        def get_steam_details(app_id):
+            try:
+                # Delay para não tomar block da API
+                time.sleep(random.uniform(0.05, 0.1))
+                
+                url_det = f"http://store.steampowered.com/api/appdetails?appids={app_id}&cc=BR&l=portuguese"
+                res = requests.get(url_det, timeout=5).json()
+                
+                if str(app_id) in res and res[str(app_id)]["success"]:
+                    game_data = res[str(app_id)]["data"]
+                    
+                    # --- FILTROS DE QUALIDADE E CONTEÚDO ---
+                    
+                    # 1. Filtra se não for jogo base (descarta DLCs, hardware, etc se aparecerem)
+                    if game_data.get("type") != "game":
+                        return None
+
+                    # 2. Filtra Conteúdo Adulto / Hentai
+                    # Verifica descritores de conteúdo da Steam (Ids 1=Nudity, 3=Sexual Content)
+                    descriptors = game_data.get("content_descriptors", {}).get("ids", [])
+                    if 3 in descriptors: # Sexual Content Explícito
+                        return None
+                        
+                    # Verifica palavras chave no nome e descrição curta
+                    name_lower = game_data["name"].lower()
+                    desc_lower = game_data.get("short_description", "").lower()
+                    banned_terms = ["hentai", "sex ", "sexual", "nude", "uncensored", "18+"]
+                    
+                    if any(term in name_lower for term in banned_terms):
+                        return None
+                    
+                    # Filtra shovelware pornografico pela descrição se for muito suspeita
+                    if "sexual acts" in desc_lower or "explicit content" in desc_lower:
+                        return None
+
+                    # --- FORMATAÇÃO DE DADOS ---
+
+                    # Formata Gêneros
+                    genres = [g["description"] for g in game_data.get("genres", [])][:2]
+                    
+                    # Formata Plataformas
+                    platforms = ["PC"]
+                    if game_data.get("platforms", {}).get("mac"): platforms.append("Mac")
+                    
+                    # TRATAMENTO DE DATA (Resolve o "Invalid Date")
+                    raw_date = game_data.get("release_date", {}).get("date", "")
+                    clean_date = raw_date
+                    
+                    # Tenta limpar a data PT-BR para algo mais limpo
+                    # Ex: "27 fev., 2025" -> "27 Fev 2025"
+                    try:
+                        clean_date = clean_date.replace(".", "").strip()
+                        # Capitaliza o mês (fev -> Fev)
+                        parts = clean_date.split(" ")
+                        if len(parts) >= 2:
+                            parts[1] = parts[1].capitalize()
+                            clean_date = " ".join(parts)
+                    except:
+                        pass # Se falhar, usa a original
+
+                    return {
+                        "id": app_id,
+                        "name": game_data["name"],
+                        "image": game_data.get("header_image", ""),
+                        "release_date": clean_date, # Retorna string limpa
+                        "summary": game_data.get("short_description", "Sem descrição disponível."),
+                        "platforms": platforms,
+                        "genres": genres
+                    }
+            except Exception as e:
+                # Silencia erros individuais para não quebrar a lista
+                return None
+            return None
+
         results = []
+        # Executa em paralelo
+        with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
+            future_to_id = {executor.submit(get_steam_details, i): i for i in target_ids}
+            for future in concurrent.futures.as_completed(future_to_id):
+                r = future.result()
+                if r: results.append(r)
         
-        # Função auxiliar para processar cada jogo (para usar com threads se quiser, ou simples aqui)
-        for game in games:
-            cover_url = ""
-            if "cover" in game:
-                cover_url = format_igdb_image(game["cover"]["url"], "t_cover_big")
-            
-            platforms = [p["name"] for p in game.get("platforms", [])]
-            genres = [g["name"] for g in game.get("genres", [])]
+        # Reordena conforme a lista original da Steam (relevância)
+        results.sort(key=lambda x: target_ids.index(x["id"]) if x["id"] in target_ids else 999)
 
-            # TRADUÇÃO (Isso é o que demora, então o cache é vital)
-            original_summary = game.get("summary", "Sem descrição.")
-            translated_summary = safe_translate(original_summary)
-
-            results.append({
-                "id": game["id"],
-                "name": game["name"],
-                "image": cover_url,
-                "release_date": game.get("first_release_date"),
-                "summary": translated_summary,
-                "platforms": platforms[:3],
-                "genres": genres[:2]
-            })
-        
         # Atualiza Cache
-        upcoming_cache["data"] = results
+        upcoming_cache["data"] = results[:12] # Pega os 12 primeiros válidos
         upcoming_cache["last_updated"] = current_time
         
-        return results
+        return upcoming_cache["data"]
+
     except Exception as e:
-        print(f"Erro ao buscar lançamentos IGDB: {e}")
+        print(f"Erro Geral Steam Upcoming: {e}")
         return []
 
 @app.get("/api/news/latest")
