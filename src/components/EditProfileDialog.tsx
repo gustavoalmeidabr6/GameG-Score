@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { useNavigate } from "react-router-dom"; // <--- IMPORTANTE: Adicionado para mudar a URL
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -18,8 +19,7 @@ import banner5 from "@/assets/BANNER5.png";
 import banner6 from "@/assets/BANNER6.png"; 
 import defaultProfileImg from "@/assets/defaultprofile.png";
 
-// Logos das Redes (Você pode usar imports de imagem se tiver, ou ícones do lucide como placeholder)
-// Vou usar cores para representar
+// Logos das Redes
 const SOCIAL_COLORS = {
     steam: "text-[#66c0f4]",
     xbox: "text-[#107c10]",
@@ -40,6 +40,8 @@ interface EditProfileDialogProps {
 const presetBanners = [banner1, banner2, banner3, banner4, banner5, banner6];
 
 export const EditProfileDialog = ({ open, onOpenChange, currentBio, currentUsername, currentNickname, currentSocial, onProfileUpdate }: EditProfileDialogProps) => {
+  const navigate = useNavigate(); // <--- Hook de navegação iniciado
+  
   const [bio, setBio] = useState(currentBio || "");
   const [username, setUsername] = useState(currentUsername || "");
   const [nickname, setNickname] = useState(currentNickname || ""); 
@@ -113,7 +115,17 @@ export const EditProfileDialog = ({ open, onOpenChange, currentBio, currentUsern
       if (response.ok) {
         toast.success("Perfil atualizado com sucesso!");
         localStorage.setItem("username", username);
-        onProfileUpdate(); 
+        
+        // --- CORREÇÃO AQUI ---
+        // Se o username mudou, precisamos forçar a mudança na URL do navegador
+        if (username !== currentUsername) {
+            navigate(`/profile/${username}`); 
+            // O navigate vai desmontar o Profile atual e montar o novo, carregando os dados certos
+        } else {
+            // Se o username é o mesmo, apenas atualizamos os dados na tela atual
+            onProfileUpdate(); 
+        }
+        
         onOpenChange(false);
       } else {
         toast.error(resData.detail || "Erro ao atualizar perfil.");
