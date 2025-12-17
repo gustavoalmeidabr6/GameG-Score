@@ -1,11 +1,11 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
 import { 
   ArrowLeft, MessageSquare, Heart, Send, User as UserIcon, 
   Gamepad2, Users, ShoppingCart, MonitorPlay, 
-  Trophy, TrendingUp 
+  Trophy, TrendingUp, Star 
 } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Textarea } from "@/components/ui/textarea";
@@ -114,6 +114,9 @@ const GameDetails = () => {
   const { id } = useParams(); 
   const navigate = useNavigate();
   
+  // REFERÊNCIA PARA SCROLL
+  const reviewSectionRef = useRef<HTMLDivElement>(null);
+
   const [game, setGame] = useState<GameDetails | null>(null);
   const [review, setReview] = useState<ReviewForm>(defaultReviewState);
   
@@ -196,6 +199,11 @@ const GameDetails = () => {
   const calculateUserAverage = () => {
     const scores = Object.values(review);
     return scores.reduce((a, b) => a + b, 0) / scores.length;
+  };
+
+  // FUNÇÃO PARA ROLAR ATÉ A AVALIAÇÃO
+  const scrollToReview = () => {
+    reviewSectionRef.current?.scrollIntoView({ behavior: "smooth" });
   };
 
   const handleSubmitReview = async () => {
@@ -371,9 +379,20 @@ const GameDetails = () => {
                         </Badge>
                      ))}
                   </div>
-                  <h1 className="text-4xl md:text-6xl lg:text-7xl font-black font-pixel text-white tracking-tight drop-shadow-lg leading-none">
-                     {game.name}
-                  </h1>
+                  
+                  {/* TÍTULO E BOTÃO DE AVALIAR */}
+                  <div className="flex flex-col md:flex-row md:items-center gap-4">
+                      <h1 className="text-4xl md:text-6xl lg:text-7xl font-black font-pixel text-white tracking-tight drop-shadow-lg leading-none">
+                         {game.name}
+                      </h1>
+                      <Button 
+                        onClick={scrollToReview} 
+                        variant="outline" 
+                        className="w-fit border-primary/50 text-primary hover:bg-primary hover:text-black font-bold"
+                      >
+                        <Star className="w-4 h-4 mr-2 fill-primary" /> AVALIAR
+                      </Button>
+                  </div>
                </div>
 
                {/* --- STEAM BOX --- */}
@@ -402,7 +421,7 @@ const GameDetails = () => {
                             <div className="flex items-end gap-2">
                                {game.steam_data.price_overview?.discount_percent ? (
                                   <span className="bg-[#4c6b22] text-[#a4d007] px-2 py-0.5 rounded text-sm font-bold">
-                                     -{game.steam_data.price_overview.discount_percent}%
+                                      -{game.steam_data.price_overview.discount_percent}%
                                   </span>
                                ) : null}
                                <span className="text-2xl font-bold text-white">
@@ -449,7 +468,8 @@ const GameDetails = () => {
               </p>
            </div>
 
-           <div className="bg-[#121214] p-8 rounded-xl border border-primary/20 relative overflow-hidden">
+           {/* REFERÊNCIA ADICIONADA AQUI */}
+           <div ref={reviewSectionRef} className="bg-[#121214] p-8 rounded-xl border border-primary/20 relative overflow-hidden">
                <div className="absolute top-0 right-0 p-4 opacity-10 pointer-events-none">
                   <Gamepad2 className="w-64 h-64 text-primary" />
                </div>
