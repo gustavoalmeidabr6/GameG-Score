@@ -33,6 +33,37 @@ export const ProfileHeader = ({ username, level, avatarUrl, bannerUrl, xp, bio, 
   const xpNeededForNext = currentRank.next - currentRank.prev;
   const percentage = currentRank.name === "SAFIRA" ? 100 : Math.min((xpGainedInTier / xpNeededForNext) * 100, 100);
   // -----------------------
+
+  // --- LÓGICA DE CORES DO AVATAR BASEADA NO BANNER ---
+  const getAvatarTheme = (url?: string) => {
+    // Padrão (Verde / Primary)
+    let borderClass = "border-primary/50 ring-primary/20 shadow-[0_0_40px_hsl(var(--primary)/0.6)]";
+    let glowClass = "bg-primary/20";
+
+    if (url) {
+      if (url.includes("BANNER8")) {
+        // AZUL
+        borderClass = "border-blue-500/80 ring-blue-500/20 shadow-[0_0_40px_rgba(59,130,246,0.6)]";
+        glowClass = "bg-blue-500/20";
+      } else if (url.includes("BANNER9")) {
+        // ROXO
+        borderClass = "border-purple-500/80 ring-purple-500/20 shadow-[0_0_40px_rgba(168,85,247,0.6)]";
+        glowClass = "bg-purple-500/20";
+      } else if (url.includes("BANNER10")) {
+        // CINZA BRILHANTE / PRATA
+        borderClass = "border-gray-200/80 ring-gray-200/20 shadow-[0_0_40px_rgba(229,231,235,0.6)]";
+        glowClass = "bg-gray-200/20";
+      } else if (url.includes("BANNER7")) {
+        // VERDE (Mantém o padrão ou força verde se primary for diferente)
+        borderClass = "border-[#3bbe5d]/80 ring-[#3bbe5d]/20 shadow-[0_0_40px_rgba(59,190,93,0.6)]";
+        glowClass = "bg-[#3bbe5d]/20";
+      }
+    }
+    
+    return { border: borderClass, glow: glowClass };
+  };
+
+  const theme = getAvatarTheme(bannerUrl);
   
   return (
     <div className="relative w-full mb-4">
@@ -69,11 +100,13 @@ export const ProfileHeader = ({ username, level, avatarUrl, bannerUrl, xp, bio, 
           {/* Centro: Avatar */}
           <div className="relative flex-shrink-0 flex justify-center">
             <div className="relative">
-                <div className="absolute inset-0 rounded-full bg-primary/20 blur-2xl scale-110" />
+                {/* Glow de fundo dinâmico */}
+                <div className={`absolute inset-0 rounded-full blur-2xl scale-110 transition-colors duration-500 ${theme.glow}`} />
+                {/* Imagem com borda dinâmica */}
                 <img
-                src={avatarUrl || defaultAvatar}
-                alt={username}
-                className="relative w-28 h-28 md:w-32 md:h-32 rounded-full border-4 border-primary/50 ring-4 ring-primary/20 ring-offset-4 ring-offset-transparent shadow-[0_0_40px_hsl(var(--primary)/0.6)] object-cover bg-black"
+                  src={avatarUrl || defaultAvatar}
+                  alt={username}
+                  className={`relative w-28 h-28 md:w-32 md:h-32 rounded-full border-4 ring-4 ring-offset-4 ring-offset-transparent object-cover bg-black transition-all duration-500 ${theme.border}`}
                 />
             </div>
           </div>
