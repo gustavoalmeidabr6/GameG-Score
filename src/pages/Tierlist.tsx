@@ -185,7 +185,12 @@ export default function Tierlist() {
       return;
     }
     const userId = localStorage.getItem("userId");
-    if (!userId) return;
+    const token = localStorage.getItem("token"); // <--- Pegar Token
+
+    if (!userId || !token) {
+        toast.error("Faça login novamente.");
+        return;
+    }
 
     setIsSaving(true);
     try {
@@ -202,7 +207,10 @@ export default function Tierlist() {
 
       const response = await fetch(url, {
         method: method,
-        headers: { "Content-Type": "application/json" },
+        headers: { 
+            "Content-Type": "application/json",
+            "Authorization": `Bearer ${token}` // <--- Token de Segurança
+        },
         body: JSON.stringify(body)
       });
 
@@ -221,12 +229,20 @@ export default function Tierlist() {
 
   const handleDeleteTierlist = async (id: number) => {
     if (!confirm("Excluir esta Tierlist?")) return;
-    const userId = localStorage.getItem("userId");
+    const token = localStorage.getItem("token");
+
     try {
-        const res = await fetch(`/api/tierlist/${id}?owner_id=${userId}`, { method: "DELETE" });
+        const res = await fetch(`/api/tierlist/${id}`, { 
+            method: "DELETE",
+            headers: { 
+                "Authorization": `Bearer ${token}` // <--- Token de Segurança (Sem owner_id na URL)
+            }
+        });
         if (res.ok) {
             toast.success("Excluída.");
             setSavedTierlists(prev => prev.filter(t => t.id !== id));
+        } else {
+            toast.error("Erro ao excluir.");
         }
     } catch(e) { toast.error("Erro."); }
   };
@@ -234,12 +250,17 @@ export default function Tierlist() {
   const handleLike = async () => {
       if (!currentTierlistId) return;
       const userId = localStorage.getItem("userId");
-      if (!userId) { toast.error("Faça login."); return; }
+      const token = localStorage.getItem("token");
+
+      if (!userId || !token) { toast.error("Faça login."); return; }
       
       try {
           const res = await fetch(`/api/tierlist/${currentTierlistId}/like`, {
               method: "POST",
-              headers: { "Content-Type": "application/json" },
+              headers: { 
+                  "Content-Type": "application/json",
+                  "Authorization": `Bearer ${token}` // <--- Token de Segurança
+              },
               body: JSON.stringify({ user_id: parseInt(userId), tierlist_id: currentTierlistId })
           });
           if (res.ok) {
@@ -258,12 +279,17 @@ export default function Tierlist() {
   const handlePostComment = async () => {
       if (!newComment.trim() || !currentTierlistId) return;
       const userId = localStorage.getItem("userId");
-      if (!userId) { toast.error("Faça login para comentar."); return; }
+      const token = localStorage.getItem("token");
+
+      if (!userId || !token) { toast.error("Faça login para comentar."); return; }
 
       try {
           const res = await fetch("/api/tierlist/comment", {
               method: "POST",
-              headers: { "Content-Type": "application/json" },
+              headers: { 
+                  "Content-Type": "application/json",
+                  "Authorization": `Bearer ${token}` // <--- Token de Segurança
+              },
               body: JSON.stringify({
                   tierlist_id: currentTierlistId,
                   user_id: parseInt(userId),
@@ -425,7 +451,7 @@ export default function Tierlist() {
                                     Limpar
                                 </Button>
                              </>
-                         ) : (
+                          ) : (
                              <>
                                 <Button onClick={handleNewTierlist} variant="ghost" className="text-gray-400 hover:text-white">
                                     Limpar
@@ -435,7 +461,7 @@ export default function Tierlist() {
                                     {isSaving ? "Salvando..." : "Salvar"}
                                 </Button>
                              </>
-                         )}
+                          )}
                     </div>
                 </div>
 
