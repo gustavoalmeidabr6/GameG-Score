@@ -2,7 +2,7 @@ import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { 
   Trophy, Calendar, Newspaper, ArrowLeft, ExternalLink, 
-  Gamepad2, Loader2, Award, Clock, Crown
+  Gamepad2, Loader2, Award, Clock, Crown, Sparkles, Rocket
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -67,25 +67,53 @@ export default function Dados() {
   const [activeTab, setActiveTab] = useState("releases");
 
   const [upcomingGames, setUpcomingGames] = useState<any[]>([]);
+  const [anticipatedGames, setAnticipatedGames] = useState<any[]>([]); // Novo estado para 2026
   const [news, setNews] = useState<any[]>([]);
   
   const [loadingUpcoming, setLoadingUpcoming] = useState(false);
   const [loadingNews, setLoadingNews] = useState(false);
 
   useEffect(() => {
-    // Buscar lançamentos (Agora virá traduzido do backend)
+    // Buscar lançamentos próximos (Steam)
     setLoadingUpcoming(true);
     fetch("/api/games/upcoming")
       .then(res => res.json())
-      .then(data => setUpcomingGames(data))
+      .then(data => {
+        // Proteção: só define se for array e PEGA APENAS OS 4 PRIMEIROS
+        if (Array.isArray(data)) setUpcomingGames(data.slice(0, 4));
+        else setUpcomingGames([]); 
+      })
       .catch(err => console.error("Erro lançamentos:", err))
       .finally(() => setLoadingUpcoming(false));
 
-    // Buscar notícias (Agora virá traduzido do backend)
+    // Buscar lançamentos 2026
+    fetch("/api/games/anticipated_2026")
+      .then(res => {
+        if (!res.ok) throw new Error("Rota não encontrada ou erro no servidor");
+        return res.json();
+      })
+      .then(data => {
+        // Proteção essencial: só define se for um Array
+        if (Array.isArray(data)) {
+            setAnticipatedGames(data);
+        } else {
+            console.error("Formato de dados inválido recebido para 2026:", data);
+            setAnticipatedGames([]); // Mantém vazio para não quebrar
+        }
+      })
+      .catch(err => {
+          console.error("Erro 2026:", err);
+          setAnticipatedGames([]); // Garante que continue sendo um array vazio em caso de erro
+      });
+
+    // Buscar notícias
     setLoadingNews(true);
     fetch("/api/news/latest")
       .then(res => res.json())
-      .then(data => setNews(data))
+      .then(data => {
+         if (Array.isArray(data)) setNews(data);
+         else setNews([]);
+      })
       .catch(err => console.error("Erro notícias:", err))
       .finally(() => setLoadingNews(false));
   }, []);
@@ -139,52 +167,126 @@ export default function Dados() {
           </div>
 
           {/* ABA 1: LANÇAMENTOS */}
-          <TabsContent value="releases" className="animate-fade-in">
-             {loadingUpcoming ? (
-                 <div className="flex flex-col items-center justify-center py-20 text-primary gap-2">
-                    <Loader2 className="w-10 h-10 animate-spin" />
-                    <span className="text-xs text-gray-400 uppercase">Traduzindo dados...</span>
+          <TabsContent value="releases" className="animate-fade-in space-y-12">
+             
+             {/* SEÇÃO 1: PRÓXIMOS DA STEAM */}
+             <div>
+                <h2 className="text-xl font-bold mb-6 flex items-center gap-2 text-white">
+                    <Rocket className="w-5 h-5 text-primary" /> Lançamentos Iminentes (Steam)
+                </h2>
+                {loadingUpcoming ? (
+                    <div className="flex flex-col items-center justify-center py-20 text-primary gap-2">
+                        <Loader2 className="w-10 h-10 animate-spin" />
+                        <span className="text-xs text-gray-400 uppercase">Carregando dados...</span>
+                    </div>
+                ) : upcomingGames.length > 0 ? (
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+                        {upcomingGames.map((game) => (
+                            <div key={game.id} className="group bg-[#151515] border border-white/5 rounded-xl overflow-hidden hover:border-primary/50 transition-all flex flex-col h-full">
+                            <div className="relative aspect-video overflow-hidden">
+                                <img 
+                                    src={game.image || "/placeholder.png"} 
+                                    className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500" 
+                                />
+                                <div className="absolute top-2 right-2 bg-black/80 text-primary text-xs font-bold px-2 py-1 rounded border border-primary/20">
+                                    {game.release_date}
+                                </div>
+                            </div>
+                            <div className="p-4 flex flex-col flex-1">
+                                <h3 className="font-bold text-lg text-white mb-2 leading-tight group-hover:text-primary transition-colors">
+                                    {game.name}
+                                </h3>
+                                <div className="flex flex-wrap gap-2 mb-3">
+                                    {game.genres && game.genres.map((g: string) => (
+                                        <Badge key={g} variant="outline" className="text-[10px] border-white/10 text-gray-400">
+                                            {g}
+                                        </Badge>
+                                    ))}
+                                </div>
+                                <p className="text-gray-500 text-xs line-clamp-3 mb-4 flex-1">
+                                    {game.summary}
+                                </p>
+                                <div className="flex items-center gap-2 text-xs text-gray-400 mt-auto pt-4 border-t border-white/5">
+                                    <Gamepad2 className="w-3 h-3" />
+                                    {game.platforms?.join(", ") || "PC"}
+                                </div>
+                            </div>
+                            </div>
+                        ))}
+                    </div>
+                ) : (
+                    <div className="text-center py-10 text-gray-500">
+                        <p>Nenhum lançamento encontrado.</p>
+                    </div>
+                )}
+             </div>
+
+             <Separator className="bg-white/10" />
+
+             {/* SEÇÃO 2: MAIS ESPERADOS 2026 */}
+             <div>
+                 <div className="mb-8">
+                    <h2 className="text-3xl font-black font-pixel text-purple-400 uppercase tracking-wide flex items-center gap-3 mb-2">
+                        <Sparkles className="w-8 h-8 fill-current" /> O Grande Ano de 2026
+                    </h2>
+                    <p className="text-gray-400 max-w-2xl">
+                        A lista definitiva dos jogos mais aguardados para o próximo ano. De GTA VI a remakes clássicos, 2026 promete ser histórico.
+                    </p>
                  </div>
-             ) : upcomingGames.length > 0 ? (
-                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-                    {upcomingGames.map((game) => (
-                        <div key={game.id} className="group bg-[#151515] border border-white/5 rounded-xl overflow-hidden hover:border-primary/50 transition-all flex flex-col h-full">
-                           <div className="relative aspect-video overflow-hidden">
-                               <img 
-                                 src={game.image || "/placeholder.png"} 
-                                 className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500" 
-                               />
-                               <div className="absolute top-2 right-2 bg-black/80 text-primary text-xs font-bold px-2 py-1 rounded border border-primary/20">
-                                   {formatDate(game.release_date)}
-                               </div>
-                           </div>
-                           <div className="p-4 flex flex-col flex-1">
-                               <h3 className="font-bold text-lg text-white mb-2 leading-tight group-hover:text-primary transition-colors">
-                                   {game.name}
-                               </h3>
-                               <div className="flex flex-wrap gap-2 mb-3">
-                                   {game.genres && game.genres.map((g: string) => (
-                                       <Badge key={g} variant="outline" className="text-[10px] border-white/10 text-gray-400">
-                                           {g}
-                                       </Badge>
-                                   ))}
-                               </div>
-                               <p className="text-gray-500 text-xs line-clamp-3 mb-4 flex-1">
-                                   {game.summary}
-                               </p>
-                               <div className="flex items-center gap-2 text-xs text-gray-400 mt-auto pt-4 border-t border-white/5">
-                                   <Gamepad2 className="w-3 h-3" />
-                                   {game.platforms?.join(", ") || "Plataformas TBD"}
-                               </div>
-                           </div>
+
+                 <div className="space-y-10">
+                    {anticipatedGames.map((section: any, idx: number) => (
+                        <div key={idx}>
+                            <h3 className="text-xl font-bold text-white/80 border-l-4 border-purple-500 pl-3 mb-6">
+                                {section.category}
+                            </h3>
+                            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
+                                {section.games.map((game: any) => (
+                                    <div key={game.id} className="flex flex-col bg-[#111] rounded-lg border border-white/5 overflow-hidden hover:bg-[#161616] hover:border-purple-500/30 transition-all group">
+                                        
+                                        {/* IMAGEM DO JOGO */}
+                                        <div className="relative aspect-video w-full overflow-hidden">
+                                            <img 
+                                                src={game.image || "/placeholder.png"} 
+                                                alt={game.name}
+                                                className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
+                                            />
+                                            {/* Data sobre a imagem */}
+                                            <div className="absolute top-2 right-2">
+                                                <Badge className="bg-black/80 text-purple-300 border border-purple-500/30 backdrop-blur-sm">
+                                                    {game.release_date}
+                                                </Badge>
+                                            </div>
+                                        </div>
+                                        
+                                        <div className="p-5 flex flex-col flex-1 relative z-10">
+                                            <h4 className="text-xl font-bold text-white mb-1 group-hover:text-purple-400 transition-colors">
+                                                {game.name}
+                                            </h4>
+                                            <p className="text-xs text-gray-500 font-mono mb-4 uppercase tracking-widest">
+                                                {game.developer}
+                                            </p>
+                                            
+                                            <p className="text-sm text-gray-400 leading-relaxed mb-4 flex-1">
+                                                {game.description}
+                                            </p>
+                                            
+                                            <div className="flex flex-wrap gap-2 mt-auto pt-4 border-t border-white/5">
+                                                {game.platforms.map((plat: string) => (
+                                                    <span key={plat} className="text-[10px] bg-black px-2 py-1 rounded border border-white/10 text-gray-400">
+                                                        {plat}
+                                                    </span>
+                                                ))}
+                                            </div>
+                                        </div>
+                                    </div>
+                                ))}
+                            </div>
                         </div>
                     ))}
                  </div>
-             ) : (
-                 <div className="text-center py-20 text-gray-500">
-                     <p>Nenhum lançamento encontrado.</p>
-                 </div>
-             )}
+             </div>
+
           </TabsContent>
 
           {/* ABA 2: NOTÍCIAS */}
@@ -232,7 +334,7 @@ export default function Dados() {
              )}
           </TabsContent>
 
-          {/* ABA 3: TGA 2025 (COM FUNDO DO CLAIR OBSCUR CORRIGIDO) */}
+          {/* ABA 3: TGA 2025 */}
           <TabsContent value="goty" className="animate-fade-in">
               <div className="relative rounded-2xl overflow-hidden mb-8 border border-yellow-500/30 min-h-[450px] flex items-center">
                   
