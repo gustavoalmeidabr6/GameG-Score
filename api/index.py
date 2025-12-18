@@ -779,20 +779,20 @@ def toggle_tierlist_like(tierlist_id: int, like_data: TierlistLikeInput, current
 #  DEMAIS ROTAS (MANTIDAS)
 # ==============================================================================
 
-@app.get("/api/DANGEROUS-RESET-DB")
-def dangerous_reset_db(db: Session = Depends(get_db)):
+# @app.get("/api/DANGEROUS-RESET-DB")
+# def dangerous_reset_db(db: Session = Depends(get_db)):
 #     # ROTA COMENTADA POR SEGURANÇA. DESCOMENTE SE PRECISAR RESETAR.
-     try:
-         global engine
-         with engine.connect() as connection:
-             connection.execute(text("DROP TABLE IF EXISTS friendships CASCADE"))
-             connection.commit()
-            
-         Base.metadata.drop_all(bind=engine)
-         Base.metadata.create_all(bind=engine)
-         return {"message": "SUCESSO: Banco resetado e tabelas atualizadas!"}
-     except Exception as e:
-         return {"error": f"FALHA ao resetar: {str(e)}"}
+#     try:
+#         global engine
+#         with engine.connect() as connection:
+#             connection.execute(text("DROP TABLE IF EXISTS friendships CASCADE"))
+#             connection.commit()
+#            
+#         Base.metadata.drop_all(bind=engine)
+#         Base.metadata.create_all(bind=engine)
+#         return {"message": "SUCESSO: Banco resetado e tabelas atualizadas!"}
+#     except Exception as e:
+#         return {"error": f"FALHA ao resetar: {str(e)}"}
 
 @app.post("/api/auth/register")
 def register(user: UserCreate, db: Session = Depends(get_db)):
