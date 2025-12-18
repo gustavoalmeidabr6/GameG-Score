@@ -779,20 +779,20 @@ def toggle_tierlist_like(tierlist_id: int, like_data: TierlistLikeInput, current
 #  DEMAIS ROTAS (MANTIDAS)
 # ==============================================================================
 
-# @app.get("/api/DANGEROUS-RESET-DB")
-# def dangerous_reset_db(db: Session = Depends(get_db)):
+@app.get("/api/DANGEROUS-RESET-DB")
+def dangerous_reset_db(db: Session = Depends(get_db)):
 #     # ROTA COMENTADA POR SEGURANÇA. DESCOMENTE SE PRECISAR RESETAR.
-#     try:
-#         global engine
-#         with engine.connect() as connection:
-#             connection.execute(text("DROP TABLE IF EXISTS friendships CASCADE"))
-#             connection.commit()
+     try:
+         global engine
+         with engine.connect() as connection:
+             connection.execute(text("DROP TABLE IF EXISTS friendships CASCADE"))
+             connection.commit()
             
-#         Base.metadata.drop_all(bind=engine)
-#         Base.metadata.create_all(bind=engine)
-#         return {"message": "SUCESSO: Banco resetado e tabelas atualizadas!"}
-#     except Exception as e:
-#         return {"error": f"FALHA ao resetar: {str(e)}"}
+         Base.metadata.drop_all(bind=engine)
+         Base.metadata.create_all(bind=engine)
+         return {"message": "SUCESSO: Banco resetado e tabelas atualizadas!"}
+     except Exception as e:
+         return {"error": f"FALHA ao resetar: {str(e)}"}
 
 @app.post("/api/auth/register")
 def register(user: UserCreate, db: Session = Depends(get_db)):
@@ -2343,28 +2343,34 @@ def create_discussion(data: DiscussionInput, current_user: User = Depends(get_cu
 
 @app.post("/api/discussions/vote")
 def vote_discussion(data: VoteInput, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
-    # Verifica se já votou
+    # Verifica se esse usuário já votou nessa discussão
     existing = db.query(DiscussionVote).filter(
         DiscussionVote.discussion_id == data.discussion_id, 
         DiscussionVote.user_id == current_user.id
     ).first()
     
     if existing:
-        # Se clicar no mesmo, remove (toggle). Se clicar no outro, troca.
+        # Se o usuário clicou no MESMO botão (ex: já tinha dado like e clicou no like de novo)
         if existing.vote_type == data.vote_type:
             db.delete(existing)
             db.commit()
             return {"status": "removed"}
         else:
+            # Se o usuário clicou no OUTRO botão (ex: tinha like, clicou dislike)
             existing.vote_type = data.vote_type
             db.commit()
             return {"status": "updated"}
     else:
-        new_vote = DiscussionVote(discussion_id=data.discussion_id, user_id=current_user.id, vote_type=data.vote_type)
+        # Se nunca votou, cria um novo
+        new_vote = DiscussionVote(
+            discussion_id=data.discussion_id, 
+            user_id=current_user.id, 
+            vote_type=data.vote_type
+        )
         db.add(new_vote)
         db.commit()
         return {"status": "created"}
-
+    
 @app.get("/api/discussions/{discussion_id}/comments")
 def get_discussion_comments(discussion_id: int, db: Session = Depends(get_db)):
     comments = db.query(DiscussionComment).filter(DiscussionComment.discussion_id == discussion_id).order_by(DiscussionComment.created_at.asc()).all()
