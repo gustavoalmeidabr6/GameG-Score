@@ -97,6 +97,7 @@ class Tierlist(Base):
     name = Column(String)
     data = Column(Text)
     owner_id = Column(Integer, ForeignKey("users.id"))
+    
 
 class Comment(Base):
     __tablename__ = "comments"
@@ -137,6 +138,32 @@ class FriendRequest(Base):
     sender_id = Column(Integer, ForeignKey("users.id"), nullable=False)
     receiver_id = Column(Integer, ForeignKey("users.id"), nullable=False)
     status = Column(String, default="pending") # pending, accepted
+# --- NOVOS MODELOS PARA DISCUSSÕES ---
+
+class Discussion(Base):
+    __tablename__ = "discussions"
+    id = Column(Integer, primary_key=True, index=True)
+    title = Column(String, nullable=False)
+    content = Column(Text, nullable=False)
+    game_id = Column(Integer, nullable=True) # Jogo relacionado (opcional)
+    game_name = Column(String, nullable=True)
+    user_id = Column(Integer, ForeignKey("users.id"))
+    created_at = Column(String, default=lambda: datetime.now().isoformat())
+
+class DiscussionVote(Base):
+    __tablename__ = "discussion_votes"
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"))
+    discussion_id = Column(Integer, ForeignKey("discussions.id"))
+    vote_type = Column(Integer) # 1 para Like (Upvote), -1 para Deslike (Downvote)
+
+class DiscussionComment(Base):
+    __tablename__ = "discussion_comments"
+    id = Column(Integer, primary_key=True, index=True)
+    discussion_id = Column(Integer, ForeignKey("discussions.id"), nullable=False)
+    user_id = Column(Integer, ForeignKey("users.id"))
+    content = Column(Text, nullable=False)
+    created_at = Column(String, default=lambda: datetime.now().isoformat())
 
 # --- CONEXÃO COM O BANCO ---
 def get_db():
@@ -168,6 +195,23 @@ class UserCreate(BaseModel):
     username: str
     email: str
     password: str
+
+class DiscussionInput(BaseModel):
+    title: str
+    content: str
+    game_id: Optional[int] = None
+    game_name: Optional[str] = None
+    user_id: int
+
+class VoteInput(BaseModel):
+    user_id: int
+    discussion_id: int
+    vote_type: int # 1 ou -1
+
+class DiscussionCommentInput(BaseModel):
+    discussion_id: int
+    user_id: int
+    content: str
 
 class UserLogin(BaseModel):
     email: str
@@ -2067,6 +2111,126 @@ def get_anticipated_2026():
         
     ]
 
+# ==============================================================================
+#  ROTAS DE DISCUSSÕES (COMUNIDADE)
+# ==============================================================================
+
+@app.get("/api/discussions/top")
+def get_top_discussions(db: Session = Depends(get_db)):
+    # Busca discussões e calcula o "score" (soma dos votos)
+    # Ordena por score descendente e data
+    discussions = db.query(Discussion).all()
+    
+    results = []
+    for d in discussions:
+        # Calcula Score
+        score = db.query(func.sum(DiscussionVote.vote_type)).filter(DiscussionVote.discussion_id == d.id).scalar() or 0
+        
+        # Contagem de Comentários
+        comment_count = db.query(DiscussionComment).filter(DiscussionComment.discussion_id == d.id).count()
+        
+        author = db.query(User).filter(User.id == d.user_id).first()
+        
+        results.append({
+            "id": d.id,
+            "title": d.title,
+            "content": d.content,
+            "game_id": d.game_id,
+            "game_name": d.game_name,
+            "created_at": d.created_at,
+            "score": score,
+            "comment_count": comment_count,
+            "author": {
+                "id": author.id,
+                "nickname": author.nickname or author.username,
+                "avatar_url": author.avatar_url,
+                "username": author.username
+            } if author else {"nickname": "Desconhecido", "avatar_url": ""}
+        })
+    
+    # Ordenação manual python (Score > Data)
+    results.sort(key=lambda x: (x['score'], x['created_at']), reverse=True)
+    return results[:20]
+
+@app.post("/api/discussions")
+def create_discussion(data: DiscussionInput, db: Session = Depends(get_db)):
+    try:
+        new_disc = Discussion(
+            title=data.title,
+            content=data.content,
+            game_id=data.game_id,
+            game_name=data.game_name,
+            user_id=data.user_id
+        )
+        db.add(new_disc)
+        
+        # XP para o criador
+        user = db.query(User).filter(User.id == data.user_id).first()
+        if user: user.xp += 20
+        
+        db.commit()
+        return {"message": "Discussão criada!"}
+    except Exception as e:
+        db.rollback()
+        return {"error": str(e)}
+
+@app.post("/api/discussions/vote")
+def vote_discussion(data: VoteInput, db: Session = Depends(get_db)):
+    # Verifica se já votou
+    existing = db.query(DiscussionVote).filter(
+        DiscussionVote.discussion_id == data.discussion_id, 
+        DiscussionVote.user_id == data.user_id
+    ).first()
+    
+    if existing:
+        # Se clicar no mesmo, remove (toggle). Se clicar no outro, troca.
+        if existing.vote_type == data.vote_type:
+            db.delete(existing)
+            db.commit()
+            return {"status": "removed"}
+        else:
+            existing.vote_type = data.vote_type
+            db.commit()
+            return {"status": "updated"}
+    else:
+        new_vote = DiscussionVote(discussion_id=data.discussion_id, user_id=data.user_id, vote_type=data.vote_type)
+        db.add(new_vote)
+        db.commit()
+        return {"status": "created"}
+
+@app.get("/api/discussions/{discussion_id}/comments")
+def get_discussion_comments(discussion_id: int, db: Session = Depends(get_db)):
+    comments = db.query(DiscussionComment).filter(DiscussionComment.discussion_id == discussion_id).order_by(DiscussionComment.created_at.asc()).all()
+    results = []
+    for c in comments:
+        author = db.query(User).filter(User.id == c.user_id).first()
+        results.append({
+            "id": c.id,
+            "content": c.content,
+            "created_at": c.created_at,
+            "author": {
+                "nickname": author.nickname or author.username,
+                "avatar_url": author.avatar_url,
+                "username": author.username
+            } if author else {"nickname": "Anon", "avatar_url": ""}
+        })
+    return results
+
+@app.post("/api/discussions/comment")
+def post_discussion_comment(data: DiscussionCommentInput, db: Session = Depends(get_db)):
+    try:
+        new_comment = DiscussionComment(
+            discussion_id=data.discussion_id,
+            user_id=data.user_id,
+            content=data.content
+        )
+        db.add(new_comment)
+        db.commit()
+        return {"message": "Comentado!"}
+    except Exception as e:
+        db.rollback()
+        return {"error": str(e)}
+    
 if __name__ == "__main__":
     import uvicorn
     # Apenas para teste local direto, se necessário
