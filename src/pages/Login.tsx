@@ -7,7 +7,6 @@ import loginBg from "@/assets/login-bg.jpg";
 import { toast } from "sonner";
 
 const Login = () => {
-  // Usamos 'email' para ficar claro que é isso que a API espera
   const [email, setEmail] = useState(""); 
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
@@ -18,7 +17,6 @@ const Login = () => {
     setLoading(true);
 
     try {
-      // --- ALTERAÇÃO: Removido http://127.0.0.1:8000, mantido apenas /api ---
       const response = await fetch("/api/auth/login", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -30,12 +28,12 @@ const Login = () => {
       if (response.ok) {
         toast.success("Login realizado com sucesso!");
         
-        // Salva dados básicos para usar depois
+        // --- MUDANÇA PRINCIPAL AQUI ---
         localStorage.setItem("userId", data.user_id);
         localStorage.setItem("username", data.username);
+        // Salvamos o TOKEN de segurança que o backend mandou
+        localStorage.setItem("token", data.access_token); 
         
-        // --- CORREÇÃO AQUI ---
-        // Antes estava "/" (Landing), agora vai para "/home" (Dashboard)
         navigate("/home"); 
       } else {
         toast.error(data.detail || "Email ou senha incorretos.");
@@ -53,10 +51,8 @@ const Login = () => {
       className="min-h-screen bg-cover bg-center bg-no-repeat relative flex items-center justify-center"
       style={{ backgroundImage: `url(${loginBg})` }}
     >
-      {/* Dark Overlay */}
       <div className="absolute inset-0 bg-black/80" />
       
-      {/* Login Card */}
       <div className="relative z-10 w-full max-w-md mx-4">
         <div className="glass-panel p-8 rounded-lg border-2 border-gaming-neon/40 bg-black/60 backdrop-blur-xl">
           <h1 className="font-pixel text-3xl text-gaming-neon text-center mb-8 neon-text">
