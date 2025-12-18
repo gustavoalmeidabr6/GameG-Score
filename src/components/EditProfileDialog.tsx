@@ -100,7 +100,8 @@ export const EditProfileDialog = ({ open, onOpenChange, currentBio, currentUsern
   const handleSave = async () => {
     setLoading(true);
     const userId = localStorage.getItem("userId");
-    
+    const token = localStorage.getItem("token"); // <--- Pegar Token
+
     const updateData: any = { 
       user_id: userId, 
       username, 
@@ -118,7 +119,10 @@ export const EditProfileDialog = ({ open, onOpenChange, currentBio, currentUsern
     try {
       const response = await fetch("/api/profile/update", {
         method: "PUT",
-        headers: { "Content-Type": "application/json" },
+        headers: { 
+            "Content-Type": "application/json",
+            "Authorization": `Bearer ${token}` // <--- Header de Segurança Adicionado
+        },
         body: JSON.stringify(updateData),
       });
 
