@@ -1752,6 +1752,7 @@ def get_upcoming_games():
         print(f"Erro Geral Steam Upcoming: {e}")
         return []
 
+
 @app.get("/api/news/latest")
 def get_latest_news():
     global news_cache
@@ -1852,6 +1853,219 @@ def get_minigame_cover(user_id: int, db: Session = Depends(get_db)):
         })
         
     return game_data
+@app.get("/api/games/anticipated_2026")
+def get_anticipated_2026():
+    return [
+        {
+            "category": "Sequências e Continuações AAA",
+            "games": [
+                {
+                    "id": 202601,
+                    "name": "Grand Theft Auto VI",
+                    "developer": "Rockstar Games",
+                    "release_date": "19 de novembro de 2026",
+                    "platforms": ["PS5", "Xbox Series X/S"],
+                    "description": "O próximo capítulo da icônica série nos levará de volta à Vice City. A trama foca em Lucia e Jason construindo seu império do crime.",
+                    "image": "https://media-rockstargames-com.akamaized.net/mfe6/prod/__common/img/71d4d17edcd49703a5ea446cc0e588e6.jpg"
+                },
+                {
+                    "id": 202602,
+                    "name": "Resident Evil Requiem",
+                    "developer": "Capcom",
+                    "release_date": "27 de fevereiro de 2026",
+                    "platforms": ["PS5", "Xbox Series X/S", "PC"],
+                    "description": "Novo episódio com a protagonista Grace Ashcroft e o retorno de Leon S. Kennedy. Trama envolve segredos da Umbrella e um vilão enigmático.",
+                    "image": "https://cdn1.epicgames.com/spt-assets/b2e589fac93746fc8d20b4177f5b3a60/resident-evil-requiem-1lsil.jpg"
+                },
+                {
+                    "id": 202603,
+                    "name": "Final Fantasy VII Remake – Parte 3",
+                    "developer": "Square Enix",
+                    "release_date": "Final de 2026",
+                    "platforms": ["PS5", "PC (futuro)", "Switch 2 (futuro)"],
+                    "description": "A conclusão épica da trilogia reimaginada. Promete a maior escala da saga, incluindo o retorno da airship Highwind.",
+                    "image": "https://external-preview.redd.it/final-fantasy-vii-remake-part-three-currently-nine-months-v0-VZGJ4Q9MV4peuNQF4yeP1YFI_aT3lkkE7jhOswk9QOY.jpg?auto=webp&s=426cbd17d103a6fe4c06c8ad8bfc244095434342"
+                },
+                {
+                    "id": 202604,
+                    "name": "Assassin’s Creed Codename Hexe",
+                    "developer": "Ubisoft",
+                    "release_date": "Final de 2026 (Halloween)",
+                    "platforms": ["PS5", "Xbox Series X/S", "PC"],
+                    "description": "Ambientado na Europa do séc. XVII durante a caça às bruxas. Foco em ocultismo, atmosfera sombria e investigação.",
+                    "image": "https://gaming-cdn.com/images/products/12830/orig/assassin-s-creed-codename-hexe-pc-jogo-cover.jpg?v=1746198035"
+                },
+                {
+                    "id": 202605,
+                    "name": "Nioh 3",
+                    "developer": "Team Ninja",
+                    "release_date": "6 de fevereiro de 2026",
+                    "platforms": ["PS5", "PC"],
+                    "description": "Ambientado no Período Bakumatsu (Séc. XIX). Mistura espadas e armas de fogo contra yokais e o Shinsengumi.",
+                    "image": "https://upload.wikimedia.org/wikipedia/en/d/db/Nioh_3_cover_art_2026.jpg"
+                },
+                {
+                    "id": 202606,
+                    "name": "Ace Combat 8: Wings of Theve",
+                    "developer": "Bandai Namco",
+                    "release_date": "2026",
+                    "platforms": ["PS5", "Xbox Series X/S", "PC"],
+                    "description": "Retorno triunfal ao universo de Strangereal com foco em narrativa cinematográfica e dogfights realistas na nova geração.",
+                    "image": "https://image.api.playstation.com/vulcan/ap/rnd/202511/1823/5929543b280b7ff4707431f09bd5e9e5a4396a1dde269986.png"
+                },
+                {
+                    "id": 202607,
+                    "name": "Control: Resonant",
+                    "developer": "Remedy Entertainment",
+                    "release_date": "2026",
+                    "platforms": ["PS5", "Xbox Series X/S", "PC"],
+                    "description": "Dylan Faden protagoniza esta sequência nas ruas de Manhattan, enfrentando o Plano Astral fora do Bureau.",
+                    "image": "https://shared.fastly.steamstatic.com/store_item_assets/steam/apps/3669870/04a0fb15e3e8144d78ab3cce4b973097bd73d0ef/capsule_616x353.jpg?t=1765809598"
+                },
+                {
+                    "id": 202608,
+                    "name": "Dragon Quest VII: Reimagined",
+                    "developer": "Square Enix",
+                    "release_date": "5 de fevereiro de 2026",
+                    "platforms": ["PS5", "Xbox", "Switch/Switch 2", "PC"],
+                    "description": "Releitura moderna com estilo diorama e novo sistema 'Moonlighting' para subclasses. Uma aventura colossal.",
+                    "image": "https://image.api.playstation.com/vulcan/ap/rnd/202508/1808/98bf7139a8eb6b67e473c54ec0fcad8819f1b953881574cf.png"
+                }
+            ]
+        },
+        {
+            "category": "Novos AAA e Inéditos",
+            "games": [
+                {
+                    "id": 202609,
+                    "name": "Pragmata",
+                    "developer": "Capcom",
+                    "release_date": "24 de abril de 2026",
+                    "platforms": ["PS5", "Xbox", "PC", "Switch 2"],
+                    "description": "Aventura sci-fi distópica na Lua. Um 'third-person sci-fi puzzle shooter' com atmosfera surreal.",
+                    "image": "https://i.ytimg.com/vi_webp/PdDVyBtYrUI/maxresdefault.webp"
+                },
+                {
+                    "id": 202610,
+                    "name": "Marvel’s Wolverine",
+                    "developer": "Insomniac Games",
+                    "release_date": "Outubro-Dezembro 2026",
+                    "platforms": ["PS5"],
+                    "description": "Jogo solo de Logan com tom maduro e violento. Narrativa standalone possivelmente interligada ao universo Spider-Man.",
+                    "image": "https://cdn.marvel.com/content/2x/marvelswolverine_lob_crd_02.jpg"
+                },
+                {
+                    "id": 202611,
+                    "name": "Marvel Tokon: Fighting Souls",
+                    "developer": "Arc System Works",
+                    "release_date": "2º Semestre 2026",
+                    "platforms": ["PS5", "PC"],
+                    "description": "Jogo de luta 2D estilo 'kung-fu punk' unindo heróis da Marvel com a expertise da criadora de Guilty Gear.",
+                    "image": "https://image.api.playstation.com/vulcan/ap/rnd/202506/0507/3afe291dd4c976b3a2cd6f4618ada26f5f884a4f3f1aaab1.png"
+                },
+                {
+                    "id": 202612,
+                    "name": "Phantom Blade Zero",
+                    "developer": "S-Game",
+                    "release_date": "9 de setembro de 2026",
+                    "platforms": ["PS5", "PC"],
+                    "description": "Action RPG 'Kung-fu Punk'. Combates rápidos e cinematográficos em uma China imperial steampunk.",
+                    "image": "https://www.adrenaline.com.br/wp-content/uploads/2024/08/Phantom-Blade-Zero-1.jpg"
+                },
+                {
+                    "id": 202613,
+                    "name": "Saros",
+                    "developer": "Housemarque",
+                    "release_date": "30 de abril de 2026",
+                    "platforms": ["PS5"],
+                    "description": "Shooter arcade sci-fi frenético com múltiplos protagonistas e foco em cooperação contra hordas alienígenas.",
+                    "image": "https://sm.ign.com/ign_me/cover/s/saros/saros_8vmm.jpg"
+                },
+                {
+                    "id": 202614,
+                    "name": "007: First Light",
+                    "developer": "IO Interactive",
+                    "release_date": "Final de 2026",
+                    "platforms": ["PS5", "Xbox Series X/S", "PC"],
+                    "description": "História de origem de James Bond. Mistura stealth estratégico e ação cinematográfica em escala global.",
+                    "image": "https://image.api.playstation.com/vulcan/ap/rnd/202506/0421/8b3de34eb203ae7a81a96153455e6cf0cab0ac7e4930df3c.png"
+                },
+                {
+                    "id": 202615,
+                    "name": "Diablo IV: Senhor do Ódio",
+                    "developer": "Blizzard",
+                    "release_date": "2026",
+                    "platforms": ["PS5", "Xbox", "PC"],
+                    "description": "Expansão focada em Mephisto. Nova região, inimigos e mudanças estruturais no endgame.",
+                    "image": "https://static0.gamerantimages.com/wordpress/wp-content/uploads/2025/12/diablo-4-lord-of-hatred-cover-art.jpg"
+                },
+                {
+                    "id": 202616,
+                    "name": "Duskbloods",
+                    "developer": "FromSoftware",
+                    "release_date": "2026",
+                    "platforms": ["Switch 2"],
+                    "description": "RPG de ação sombrio focado em vampirismo e magia de sangue em um mundo gótico.",
+                    "image": "https://preview.redd.it/the-duskbloods-is-making-me-feel-like-who-didnt-have-a-v0-3lzv69pbx9df1.jpeg?width=640&crop=smart&auto=webp&s=8a940eb44d33e7177c8d67711ac0a95518e5aad7"
+                },
+                {
+                    "id": 202617,
+                    "name": "Pokémon Pokopia",
+                    "developer": "Game Freak",
+                    "release_date": "2026",
+                    "platforms": ["Switch 2"],
+                    "description": "Evolução do mundo aberto de Pokémon em uma região inédita com ecossistemas dinâmicos.",
+                    "image": "https://sm.ign.com/ign_br/cover/p/pokemon-po/pokemon-pokopia_qj5p.jpg"
+                },
+                {
+                    "id": 202618,
+                    "name": "Assetto Corsa EVO",
+                    "developer": "Kunos Simulazioni",
+                    "release_date": "2026",
+                    "platforms": ["PC", "PS5", "Xbox"],
+                    "description": "Simulação pura com motor gráfico renovado, clima dinâmico e física realista.",
+                    "image": "https://pbs.twimg.com/media/GMruJXtWkAEXgWn.jpg"
+                },
+                {
+                    "id": 202619,
+                    "name": "Forza Horizon 6",
+                    "developer": "Playground Games",
+                    "release_date": "2026",
+                    "platforms": ["Xbox", "PC"],
+                    "description": "Corrida em mundo aberto com novo cenário (rumores fora da Europa/EUA) e eventos narrativos.",
+                    "image": "https://shared.akamai.steamstatic.com/store_item_assets/steam/apps/2483190/fc75b5f645be08ba8964d34d4ed1980b54c2c933/ss_fc75b5f645be08ba8964d34d4ed1980b54c2c933.1920x1080.jpg?t=1759247866"
+                },
+                {
+                    "id": 202620,
+                    "name": "Halo: Campanha Evoluída",
+                    "developer": "343 Industries",
+                    "release_date": "2026",
+                    "platforms": ["Xbox", "PC"],
+                    "description": "Nova experiência single-player, evolução de Halo Infinite com narrativa guiada.",
+                    "image": "https://xboxwire.thesourcemediaassets.com/sites/8/2025/10/HaloCE_Wallpaper_Desktop-4K_3840x2160_RGB-92f0ca1dd025e4c9aded.jpg"
+                },
+                {
+                    "id": 202621,
+                    "name": "Tomb Raider Legacy of Atlantis",
+                    "developer": "Crystal Dynamics",
+                    "release_date": "2026",
+                    "platforms": ["PS5", "Xbox", "PC"],
+                    "description": "Reimaginação do original com tecnologia atual, narrativa expandida e Lara clássica.",
+                    "image": "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcRtliXWRTVaxS_OfaXmx2fvZ8IAV9N9sjtuiQ&s"
+                },
+                {
+                    "id": 202622,
+                    "name": "Marvel 1943: A Ascensão da Hydra",
+                    "developer": "Skydance New Media",
+                    "release_date": "2026",
+                    "platforms": ["PS5", "Xbox", "PC"],
+                    "description": "Ação narrativa na 2ª Guerra com Capitão América e Pantera Negra (Azzuri).",
+                    "image": "https://upload.wikimedia.org/wikipedia/pt/7/73/Marvel_1943_Rise_of_Hydra.jpeg"
+                }
+            ]
+        },
+        
+    ]
 
 if __name__ == "__main__":
     import uvicorn
