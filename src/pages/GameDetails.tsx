@@ -208,9 +208,13 @@ const GameDetails = () => {
 
   const handleSubmitReview = async () => {
     if (!game) return;
+    
+    // --- MUDANÇA: Verifica TOKEN, não apenas ID ---
+    const token = localStorage.getItem("token");
     const userId = localStorage.getItem("userId");
-    if (!userId) {
-      toast.error("Você precisa estar logado para avaliar!");
+
+    if (!token || !userId) {
+      toast.error("Sessão expirada. Faça login novamente.");
       navigate("/");
       return;
     }
@@ -224,13 +228,16 @@ const GameDetails = () => {
       game_name: game.name,
       game_image_url: game.image?.medium_url || "",
       genre: genreName, 
-      owner_id: parseInt(userId)
+      owner_id: parseInt(userId) // O backend vai ignorar isso e usar o token, mas enviamos para garantir
     };
     
     try {
       const response = await fetch('/api/review', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${token}` // <--- ENVIANDO O TOKEN AQUI
+        },
         body: JSON.stringify(reviewData)
       });
       
@@ -238,7 +245,13 @@ const GameDetails = () => {
         toast.success("Avaliação salva!");
         loadData();
       } else {
-        toast.error("Erro ao salvar review.");
+        const err = await response.json();
+        if (response.status === 401) {
+            toast.error("Sessão inválida. Faça login novamente.");
+            navigate("/");
+        } else {
+            toast.error(err.detail || "Erro ao salvar review.");
+        }
       }
     } catch (error) {
       toast.error("Falha na conexão.");
@@ -248,15 +261,20 @@ const GameDetails = () => {
   };
 
   const handlePostComment = async () => {
+    const token = localStorage.getItem("token");
     const userId = localStorage.getItem("userId");
-    if (!userId) { toast.error("Faça login para comentar."); return; }
+    
+    if (!token) { toast.error("Faça login para comentar."); return; }
     if (!newComment.trim()) return;
 
     try {
         const res = await fetch("/api/comments", {
             method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ game_id: game?.id, user_id: parseInt(userId), content: newComment })
+            headers: { 
+                "Content-Type": "application/json",
+                "Authorization": `Bearer ${token}` // <--- Token também aqui
+            },
+            body: JSON.stringify({ game_id: game?.id, user_id: parseInt(userId!), content: newComment })
         });
         if (res.ok) {
             toast.success("Comentário enviado!");
@@ -271,14 +289,19 @@ const GameDetails = () => {
   };
 
   const handleLike = async (commentId: number) => {
+    const token = localStorage.getItem("token");
     const userId = localStorage.getItem("userId");
-    if (!userId) { toast.error("Faça login para curtir."); return; }
+    
+    if (!token) { toast.error("Faça login para curtir."); return; }
 
     try {
         const res = await fetch(`/api/comments/${commentId}/like`, {
             method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ user_id: parseInt(userId), comment_id: commentId })
+            headers: { 
+                "Content-Type": "application/json",
+                "Authorization": `Bearer ${token}` // <--- Token também aqui
+            },
+            body: JSON.stringify({ user_id: parseInt(userId!), comment_id: commentId })
         });
 
         if (res.ok) {
