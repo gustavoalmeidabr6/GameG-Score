@@ -39,6 +39,7 @@ interface EditProfileDialogProps {
   currentBio?: string;
   currentUsername?: string;
   currentNickname?: string; 
+  currentBanner?: string; // <--- NOVO: Recebe o banner atual
   currentSocial?: { steam?: string, xbox?: string, psn?: string, epic?: string };
   onProfileUpdate: () => void;
 }
@@ -49,7 +50,7 @@ const presetBanners = [
   banner6, banner7, banner8, banner9, banner10
 ];
 
-export const EditProfileDialog = ({ open, onOpenChange, currentBio, currentUsername, currentNickname, currentSocial, onProfileUpdate }: EditProfileDialogProps) => {
+export const EditProfileDialog = ({ open, onOpenChange, currentBio, currentUsername, currentNickname, currentBanner, currentSocial, onProfileUpdate }: EditProfileDialogProps) => {
   const navigate = useNavigate(); // <--- Hook de navegação iniciado
   
   const [bio, setBio] = useState(currentBio || "");
@@ -70,6 +71,7 @@ export const EditProfileDialog = ({ open, onOpenChange, currentBio, currentUsern
         setBio(currentBio || "");
         setUsername(currentUsername || "");
         setNickname(currentNickname || currentUsername || ""); 
+        setSelectedBanner(null); // <--- Resetar seleção para mostrar o currentBanner
         // Reset previews se não tiver mudado
         if (currentSocial) {
           setSteamUrl(currentSocial.steam || "");
@@ -149,14 +151,16 @@ export const EditProfileDialog = ({ open, onOpenChange, currentBio, currentUsern
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-[700px] bg-[#0A0A0A] border border-white/10 text-white p-0 overflow-hidden shadow-2xl">
+      {/* Adicionado [&>button]:hidden para esconder o botão de fechar padrão do DialogContent e evitar sobreposição */}
+      <DialogContent className="sm:max-w-[700px] bg-[#0A0A0A] border border-white/10 text-white p-0 overflow-hidden shadow-2xl [&>button]:hidden">
         
         {/* HEADER CUSTOMIZADO COM PREVIEW */}
         <div className="relative h-32 w-full bg-gray-900 overflow-hidden group">
             <div 
                 className="absolute inset-0 bg-cover bg-center transition-all duration-500"
                 style={{ 
-                    backgroundImage: `url(${selectedBanner || banner1})`,
+                    // ALTERAÇÃO: Usa selectedBanner (se selecionou novo), ou currentBanner (o do perfil), ou banner1 (padrão)
+                    backgroundImage: `url(${selectedBanner || currentBanner || banner1})`,
                     opacity: 0.6
                 }}
             />
