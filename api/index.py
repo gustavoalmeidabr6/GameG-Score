@@ -35,7 +35,12 @@ news_cache = {
 
 # --- CONFIGURAÇÃO JWT (JSON WEB TOKEN) ---
 # Tente pegar do .env, senão usa uma chave padrão (apenas para dev)
-SECRET_KEY = os.environ.get("SECRET_KEY", "09d25e094faa6ca2556c818166b7a9563b93f7099f6f0f4caa6cf63b88e8d3e7")
+# --- CONFIGURAÇÃO JWT (JSON WEB TOKEN) ---
+SECRET_KEY = os.environ.get("SECRET_KEY")
+
+# Esta verificação impede que o site suba com segurança falha
+if not SECRET_KEY:
+    raise ValueError("ERRO DE SEGURANÇA: A variável de ambiente 'SECRET_KEY' não foi encontrada! Configure-a no painel da Vercel.")
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 24 * 7 # 1 semana
 
@@ -228,8 +233,21 @@ async def get_current_user(token: str = Depends(oauth2_scheme), db: Session = De
     return user
 
 app = FastAPI()
+
+# Substitua a URL abaixo pelo link real do seu site na Vercel quando ele for criado
+# Exemplo: "https://gameg-score-gustavo.vercel.app"
+origins = [
+    "http://localhost:5173",      # Permite testar no seu PC
+    "http://127.0.0.1:5173",      # Permite testar no seu PC
+    "https://SEU-SITE-NA-VERCEL.vercel.app" # <--- COLOCAR SEU LINK DA VERCEL AQUI
+]
+
 app.add_middleware(
-    CORSMiddleware, allow_origins=["*"], allow_credentials=True, allow_methods=["*"], allow_headers=["*"], 
+    CORSMiddleware, 
+    allow_origins=origins,        # Restringe quem pode chamar sua API
+    allow_credentials=True, 
+    allow_methods=["*"], 
+    allow_headers=["*"], 
 )
 
 # --- SCHEMAS (Pydantic) ---
@@ -818,20 +836,6 @@ def toggle_tierlist_like(tierlist_id: int, like_data: TierlistLikeInput, current
 #  DEMAIS ROTAS (MANTIDAS)
 # ==============================================================================
 
-# @app.get("/api/DANGEROUS-RESET-DB")
-# def dangerous_reset_db(db: Session = Depends(get_db)):
-#     # ROTA COMENTADA POR SEGURANÇA. DESCOMENTE SE PRECISAR RESETAR.
-#     try:
-#         global engine
-#         with engine.connect() as connection:
-#             connection.execute(text("DROP TABLE IF EXISTS friendships CASCADE"))
-#             connection.commit()
-#            
-#         Base.metadata.drop_all(bind=engine)
-#         Base.metadata.create_all(bind=engine)
-#         return {"message": "SUCESSO: Banco resetado e tabelas atualizadas!"}
-#     except Exception as e:
-#         return {"error": f"FALHA ao resetar: {str(e)}"}
 
 @app.post("/api/auth/register")
 def register(user: UserCreate, db: Session = Depends(get_db)):
