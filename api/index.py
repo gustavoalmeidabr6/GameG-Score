@@ -1,6 +1,9 @@
 from fastapi import FastAPI, Depends, HTTPException, Query, Body, Request
 from fastapi.responses import RedirectResponse
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.security import OAuth2PasswordBearer # <--- NOVO: Para pegar o token do header
+from jose import JWTError, jwt # <--- NOVO: Para decodificar o token
+from datetime import datetime, timedelta # <--- NOVO: Para expiração do token
 import requests
 import os
 import time
@@ -9,7 +12,6 @@ import re
 import random
 from pydantic import BaseModel
 from typing import Optional, List, Dict, Any
-from datetime import datetime
 import urllib.parse
 from difflib import SequenceMatcher 
 import concurrent.futures
@@ -30,6 +32,14 @@ news_cache = {
     "data": [],
     "last_updated": 0
 }
+
+# --- CONFIGURAÇÃO JWT (JSON WEB TOKEN) ---
+# Tente pegar do .env, senão usa uma chave padrão (apenas para dev)
+SECRET_KEY = os.environ.get("SECRET_KEY", "09d25e094faa6ca2556c818166b7a9563b93f7099f6f0f4caa6cf63b88e8d3e7")
+ALGORITHM = "HS256"
+ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 24 * 7 # 1 semana
+
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="api/auth/login")
 
 # --- CONFIGURAÇÃO DE SEGURANÇA (BCRYPT) ---
 def verify_password(plain_password, hashed_password):
@@ -185,6 +195,38 @@ def get_db():
     finally:
         if 'db' in locals() and db: db.close()
 
+# --- FUNÇÕES DE TOKEN JWT ---
+def create_access_token(data: dict, expires_delta: Optional[timedelta] = None):
+    to_encode = data.copy()
+    if expires_delta:
+        expire = datetime.utcnow() + expires_delta
+    else:
+        expire = datetime.utcnow() + timedelta(minutes=15)
+    to_encode.update({"exp": expire})
+    encoded_jwt = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
+    return encoded_jwt
+
+# Dependência para obter usuário atual baseado no token
+async def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(get_db)):
+    credentials_exception = HTTPException(
+        status_code=401,
+        detail="Credenciais inválidas",
+        headers={"WWW-Authenticate": "Bearer"},
+    )
+    try:
+        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        username: str = payload.get("sub")
+        user_id: int = payload.get("id")
+        if username is None or user_id is None:
+            raise credentials_exception
+    except JWTError:
+        raise credentials_exception
+    
+    user = db.query(User).filter(User.id == user_id).first()
+    if user is None:
+        raise credentials_exception
+    return user
+
 app = FastAPI()
 app.add_middleware(
     CORSMiddleware, allow_origins=["*"], allow_credentials=True, allow_methods=["*"], allow_headers=["*"], 
@@ -201,16 +243,16 @@ class DiscussionInput(BaseModel):
     content: str
     game_id: Optional[int] = None
     game_name: Optional[str] = None
-    user_id: int
+    # user_id removido pois pegaremos do token
 
 class VoteInput(BaseModel):
-    user_id: int
+    # user_id removido
     discussion_id: int
     vote_type: int # 1 ou -1
 
 class DiscussionCommentInput(BaseModel):
     discussion_id: int
-    user_id: int
+    # user_id removido
     content: str
 
 class UserLogin(BaseModel):
@@ -218,7 +260,7 @@ class UserLogin(BaseModel):
     password: str
 
 class UserUpdate(BaseModel):
-    user_id: int
+    user_id: Optional[int] = None # Opcional no input, ignorado na lógica
     username: Optional[str] = None
     nickname: Optional[str] = None
     bio: Optional[str] = None
@@ -240,46 +282,46 @@ class ReviewInput(BaseModel):
     narrativa: float
     audio: float
     desempenho: float
-    owner_id: int
+    # owner_id removido, vem do token
 
 class FavoritesInput(BaseModel):
-    user_id: int
+    user_id: Optional[int] = None
     game_ids: List[int]
 
 class TierlistInput(BaseModel):
     name: str
     data: Dict[str, Any]
-    owner_id: int
+    # owner_id removido
 
 class TierlistUpdate(BaseModel):
     name: str
     data: Dict[str, Any]
-    owner_id: int
+    # owner_id removido
 
 class CommentInput(BaseModel):
     game_id: int
-    user_id: int
+    # user_id removido
     content: str
 
 class LikeInput(BaseModel):
-    user_id: int
+    # user_id removido
     comment_id: int
 
 class TierlistLikeInput(BaseModel):
-    user_id: int
+    # user_id removido
     tierlist_id: int
 
 class TierlistCommentInput(BaseModel):
     tierlist_id: int
-    user_id: int
+    # user_id removido
     content: str
 
 class FollowInput(BaseModel):
-    follower_id: int
+    # follower_id removido
     followed_id: int
 
 class FriendInput(BaseModel):
-    sender_id: int
+    # sender_id removido no request
     target_id: int
 
 # ==============================================================================
@@ -719,15 +761,16 @@ def get_top_community_tierlists(db: Session = Depends(get_db)):
         })
     return results
 
+# Rota protegida: usuário deve estar logado para dar like
 @app.post("/api/tierlist/{tierlist_id}/like")
-def toggle_tierlist_like(tierlist_id: int, like_data: TierlistLikeInput, db: Session = Depends(get_db)):
-    existing = db.query(TierlistLike).filter(TierlistLike.tierlist_id == tierlist_id, TierlistLike.user_id == like_data.user_id).first()
+def toggle_tierlist_like(tierlist_id: int, like_data: TierlistLikeInput, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    existing = db.query(TierlistLike).filter(TierlistLike.tierlist_id == tierlist_id, TierlistLike.user_id == current_user.id).first()
     if existing:
         db.delete(existing)
         db.commit()
         return {"status": "unliked"}
     else:
-        new_like = TierlistLike(tierlist_id=tierlist_id, user_id=like_data.user_id)
+        new_like = TierlistLike(tierlist_id=tierlist_id, user_id=current_user.id)
         db.add(new_like)
         db.commit()
         return {"status": "liked"}
@@ -736,21 +779,20 @@ def toggle_tierlist_like(tierlist_id: int, like_data: TierlistLikeInput, db: Ses
 #  DEMAIS ROTAS (MANTIDAS)
 # ==============================================================================
 
-@app.get("/api/DANGEROUS-RESET-DB")
-def dangerous_reset_db(db: Session = Depends(get_db)):
-    try:
-        global engine
-        # Passo extra: Forçar a exclusão da tabela antiga 'friendships' que está travando o banco
-        with engine.connect() as connection:
-            connection.execute(text("DROP TABLE IF EXISTS friendships CASCADE"))
-            connection.commit()
+# @app.get("/api/DANGEROUS-RESET-DB")
+# def dangerous_reset_db(db: Session = Depends(get_db)):
+#     # ROTA COMENTADA POR SEGURANÇA. DESCOMENTE SE PRECISAR RESETAR.
+#     try:
+#         global engine
+#         with engine.connect() as connection:
+#             connection.execute(text("DROP TABLE IF EXISTS friendships CASCADE"))
+#             connection.commit()
             
-        # Agora roda o reset normal
-        Base.metadata.drop_all(bind=engine)
-        Base.metadata.create_all(bind=engine)
-        return {"message": "SUCESSO: Banco resetado e tabelas atualizadas!"}
-    except Exception as e:
-        return {"error": f"FALHA ao resetar: {str(e)}"}
+#         Base.metadata.drop_all(bind=engine)
+#         Base.metadata.create_all(bind=engine)
+#         return {"message": "SUCESSO: Banco resetado e tabelas atualizadas!"}
+#     except Exception as e:
+#         return {"error": f"FALHA ao resetar: {str(e)}"}
 
 @app.post("/api/auth/register")
 def register(user: UserCreate, db: Session = Depends(get_db)):
@@ -769,12 +811,24 @@ def register(user: UserCreate, db: Session = Depends(get_db)):
 def login(user_login: UserLogin, db: Session = Depends(get_db)):
     user = db.query(User).filter(User.email == user_login.email).first()
     if not user:
-        raise HTTPException(status_code=400, detail="Email não encontrado")
+        raise HTTPException(status_code=401, detail="Email ou senha incorretos")
     if not verify_password(user_login.password, user.hashed_password):
-        raise HTTPException(status_code=400, detail="Senha incorreta")
-    return {"message": "Login OK", "user_id": user.id, "username": user.username}
-
-# No arquivo index.py, procure por @app.get("/api/profile/{user_id}") e substitua por:
+        raise HTTPException(status_code=401, detail="Email ou senha incorretos")
+    
+    # Cria o token de acesso seguro
+    access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
+    access_token = create_access_token(
+        data={"sub": user.username, "id": user.id}, expires_delta=access_token_expires
+    )
+    
+    # Retorna o token junto com os dados para compatibilidade com o frontend atual
+    return {
+        "access_token": access_token, 
+        "token_type": "bearer", 
+        "message": "Login OK", 
+        "user_id": user.id, 
+        "username": user.username
+    }
 
 @app.get("/api/profile/{identifier}")
 def get_profile(identifier: str, db: Session = Depends(get_db)):
@@ -795,8 +849,6 @@ def get_profile(identifier: str, db: Session = Depends(get_db)):
     
     user_id = user.id # Pegamos o ID real do usuário encontrado
 
-    # --- O RESTO DA FUNÇÃO PERMANECE IGUAL, APENAS USE user_id ONDE ERA USADO ANTES ---
-    
     all_reviews = db.query(Review).filter(Review.owner_id == user_id).all()
     review_count = len(all_reviews)
     
@@ -935,10 +987,11 @@ def get_top_users(db: Session = Depends(get_db)):
         })
     return results
 
+# Rota protegida: usuário só pode atualizar o próprio perfil
 @app.put("/api/profile/update")
-def update_profile(data: UserUpdate, db: Session = Depends(get_db)):
-    user = db.query(User).filter(User.id == data.user_id).first()
-    if not user: raise HTTPException(status_code=404, detail="Usuário não encontrado")
+def update_profile(data: UserUpdate, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    # Ignora data.user_id, usa current_user
+    user = current_user
     
     if data.username is not None and data.username != user.username:
         existing = db.query(User).filter(User.username == data.username).first()
@@ -1081,11 +1134,15 @@ def get_single_tierlist(tierlist_id: int, user_id: int = -1, db: Session = Depen
         "comments": comments_list
     }
 
-# ESTA ROTA ESTAVA FALTANDO! ELA É A RESPONSÁVEL POR CRIAR A TIERLIST (POST)
+# Rota protegida: owner_id é preenchido pelo token
 @app.post("/api/tierlist")
-def create_tierlist(tierlist_input: TierlistInput, db: Session = Depends(get_db)):
+def create_tierlist(tierlist_input: TierlistInput, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     try:
-        new_tierlist = Tierlist(name=tierlist_input.name, data=json.dumps(tierlist_input.data), owner_id=tierlist_input.owner_id)
+        new_tierlist = Tierlist(
+            name=tierlist_input.name, 
+            data=json.dumps(tierlist_input.data), 
+            owner_id=current_user.id # Pega do token seguro
+        )
         db.add(new_tierlist)
         db.commit()
         return {"message": "Tierlist salva com sucesso!"}
@@ -1093,21 +1150,21 @@ def create_tierlist(tierlist_input: TierlistInput, db: Session = Depends(get_db)
         db.rollback()
         return {"error": str(e)}
 
+# Rota protegida: user_id do comentário vem do token
 @app.post("/api/tierlist/comment")
-def post_tierlist_comment(comment_data: TierlistCommentInput, db: Session = Depends(get_db)):
+def post_tierlist_comment(comment_data: TierlistCommentInput, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     try:
         new_comment = TierlistComment(
             tierlist_id=comment_data.tierlist_id,
-            user_id=comment_data.user_id,
+            user_id=current_user.id, # Pega do token seguro
             content=comment_data.content
         )
         db.add(new_comment)
         db.commit()
         
         # Opcional: Dar XP para quem comentou
-        user = db.query(User).filter(User.id == comment_data.user_id).first()
-        if user:
-            user.xp += 15
+        user = current_user
+        user.xp += 15
         db.commit()
 
         return {"message": "Comentário enviado com sucesso!"}
@@ -1126,13 +1183,14 @@ def get_tierlists(user_id: int, db: Session = Depends(get_db)):
         except: pass
     return result
 
+# Rota protegida: verifica se a tierlist pertence ao usuário do token
 @app.delete("/api/tierlist/{tierlist_id}")
-def delete_tierlist(tierlist_id: int, owner_id: int, db: Session = Depends(get_db)):
+def delete_tierlist(tierlist_id: int, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     tierlist = db.query(Tierlist).filter(Tierlist.id == tierlist_id).first()
     if not tierlist:
         raise HTTPException(status_code=404, detail="Tierlist não encontrada")
     
-    if tierlist.owner_id != owner_id:
+    if tierlist.owner_id != current_user.id:
         raise HTTPException(status_code=403, detail="Sem permissão para deletar")
 
     try:
@@ -1143,13 +1201,14 @@ def delete_tierlist(tierlist_id: int, owner_id: int, db: Session = Depends(get_d
         db.rollback()
         return {"error": str(e)}
 
+# Rota protegida: verifica se a tierlist pertence ao usuário do token
 @app.put("/api/tierlist/{tierlist_id}")
-def update_tierlist(tierlist_id: int, tierlist_input: TierlistUpdate, db: Session = Depends(get_db)):
+def update_tierlist(tierlist_id: int, tierlist_input: TierlistUpdate, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     tierlist = db.query(Tierlist).filter(Tierlist.id == tierlist_id).first()
     if not tierlist:
         raise HTTPException(status_code=404, detail="Tierlist não encontrada")
         
-    if tierlist.owner_id != tierlist_input.owner_id:
+    if tierlist.owner_id != current_user.id:
         raise HTTPException(status_code=403, detail="Sem permissão para editar")
 
     try:
@@ -1161,12 +1220,14 @@ def update_tierlist(tierlist_id: int, tierlist_input: TierlistUpdate, db: Sessio
         db.rollback()
         return {"error": str(e)}
         
+# Rota protegida: Review criada no nome do usuário do token
 @app.post("/api/review")
-def post_review(review_input: ReviewInput, db: Session = Depends(get_db)):
+def post_review(review_input: ReviewInput, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     try:
         notas = [review_input.jogabilidade, review_input.graficos, review_input.narrativa, review_input.audio, review_input.desempenho]
         nota_geral = sum(notas) / len(notas)
-        existing = db.query(Review).filter(Review.game_id == review_input.game_id, Review.owner_id == review_input.owner_id).first()
+        # Usa current_user.id
+        existing = db.query(Review).filter(Review.game_id == review_input.game_id, Review.owner_id == current_user.id).first()
         if existing:
             existing.jogabilidade = review_input.jogabilidade
             existing.graficos = review_input.graficos
@@ -1178,12 +1239,26 @@ def post_review(review_input: ReviewInput, db: Session = Depends(get_db)):
             if review_input.game_image_url: existing.game_image_url = review_input.game_image_url
             db.commit()
             return {"message": "Review atualizada!"}
-        new_review = Review(game_id=review_input.game_id, game_name=review_input.game_name, game_image_url=review_input.game_image_url, game_video_id=review_input.game_video_id, genre=review_input.genre, jogabilidade=review_input.jogabilidade, graficos=review_input.graficos, narrativa=review_input.narrativa, audio=review_input.audio, desempenho=review_input.desempenho, nota_geral=nota_geral, owner_id=review_input.owner_id)
+        
+        new_review = Review(
+            game_id=review_input.game_id, 
+            game_name=review_input.game_name, 
+            game_image_url=review_input.game_image_url, 
+            game_video_id=review_input.game_video_id, 
+            genre=review_input.genre, 
+            jogabilidade=review_input.jogabilidade, 
+            graficos=review_input.graficos, 
+            narrativa=review_input.narrativa, 
+            audio=review_input.audio, 
+            desempenho=review_input.desempenho, 
+            nota_geral=nota_geral, 
+            owner_id=current_user.id # Seguro
+        )
         db.add(new_review)
-        user = db.query(User).filter(User.id == review_input.owner_id).first()
-        if user:
-            user.xp += 100
-            user.level = 1 + (user.xp // 500)
+        
+        user = current_user
+        user.xp += 100
+        user.level = 1 + (user.xp // 500)
         db.commit()
         return {"message": "Review salva!"}
     except Exception as e:
@@ -1196,12 +1271,13 @@ def get_review(game_id: int, owner_id: int, db: Session = Depends(get_db)):
     r = db.query(Review).filter(Review.game_id == game_id, Review.owner_id == owner_id).first()
     return r if r else {"error": "Não encontrada"}
 
+# Rota protegida: Comentário atrelado ao usuário do token
 @app.post("/api/comments")
-def post_comment(comment: CommentInput, db: Session = Depends(get_db)):
+def post_comment(comment: CommentInput, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     try:
         new_comment = Comment(
             game_id=comment.game_id,
-            user_id=comment.user_id,
+            user_id=current_user.id,
             content=comment.content
         )
         db.add(new_comment)
@@ -1275,15 +1351,16 @@ def get_all_game_comments(game_id: int, user_id: int = -1, db: Session = Depends
         })
     return result
 
+# Rota protegida: Like atrelado ao usuário do token
 @app.post("/api/comments/{comment_id}/like")
-def toggle_like(comment_id: int, like_data: LikeInput, db: Session = Depends(get_db)):
-    existing = db.query(CommentLike).filter(CommentLike.comment_id == comment_id, CommentLike.user_id == like_data.user_id).first()
+def toggle_like(comment_id: int, like_data: LikeInput, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    existing = db.query(CommentLike).filter(CommentLike.comment_id == comment_id, CommentLike.user_id == current_user.id).first()
     if existing:
         db.delete(existing)
         db.commit()
         return {"status": "unliked"}
     else:
-        new_like = CommentLike(comment_id=comment_id, user_id=like_data.user_id)
+        new_like = CommentLike(comment_id=comment_id, user_id=current_user.id)
         db.add(new_like)
         db.commit()
         return {"status": "liked"}
@@ -1331,13 +1408,14 @@ def get_user_best_comment(user_id: int, db: Session = Depends(get_db)):
         "game_id": comment.game_id
     }
 
+# Rota protegida: Favoritos atrelados ao usuário do token
 @app.post("/api/profile/favorites")
-def set_favorites(input_data: FavoritesInput, db: Session = Depends(get_db)):
+def set_favorites(input_data: FavoritesInput, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     try:
-        db.query(Review).filter(Review.owner_id == input_data.user_id).update({"is_favorite": False})
+        db.query(Review).filter(Review.owner_id == current_user.id).update({"is_favorite": False})
         if input_data.game_ids:
             db.query(Review).filter(
-                Review.owner_id == input_data.user_id, 
+                Review.owner_id == current_user.id, 
                 Review.game_id.in_(input_data.game_ids)
             ).update({"is_favorite": True}, synchronize_session=False)
         db.commit()
@@ -1348,19 +1426,20 @@ def set_favorites(input_data: FavoritesInput, db: Session = Depends(get_db)):
 
 # --- ROTAS DE SEGUIR, SOCIAL E AMIGOS ---
 
+# Rota protegida: Seguir usando o ID do token
 @app.post("/api/user/follow")
-def toggle_follow(data: FollowInput, db: Session = Depends(get_db)):
-    if data.follower_id == data.followed_id:
+def toggle_follow(data: FollowInput, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    if current_user.id == data.followed_id:
         return {"error": "Não pode seguir a si mesmo"}
     
-    existing = db.query(Follower).filter(Follower.follower_id == data.follower_id, Follower.followed_id == data.followed_id).first()
+    existing = db.query(Follower).filter(Follower.follower_id == current_user.id, Follower.followed_id == data.followed_id).first()
     
     if existing:
         db.delete(existing)
         db.commit()
         return {"status": "unfollowed"}
     else:
-        new_follow = Follower(follower_id=data.follower_id, followed_id=data.followed_id)
+        new_follow = Follower(follower_id=current_user.id, followed_id=data.followed_id)
         db.add(new_follow)
         db.commit()
         return {"status": "followed"}
@@ -1426,14 +1505,15 @@ def get_friendship_status(sender_id: int, target_id: int, db: Session = Depends(
     else:
         return {"status": "pending_received"}
 
+# Rota protegida: Remetente é o usuário do token
 @app.post("/api/friend/request")
-def send_friend_request(data: FriendInput, db: Session = Depends(get_db)):
-    if data.sender_id == data.target_id: return {"error": "Mesmo usuário"}
+def send_friend_request(data: FriendInput, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    if current_user.id == data.target_id: return {"error": "Mesmo usuário"}
     
     existing = db.query(FriendRequest).filter(
         or_(
-            (FriendRequest.sender_id == data.sender_id) & (FriendRequest.receiver_id == data.target_id),
-            (FriendRequest.sender_id == data.target_id) & (FriendRequest.receiver_id == data.sender_id)
+            (FriendRequest.sender_id == current_user.id) & (FriendRequest.receiver_id == data.target_id),
+            (FriendRequest.sender_id == data.target_id) & (FriendRequest.receiver_id == current_user.id)
         )
     ).first()
     
@@ -1441,7 +1521,7 @@ def send_friend_request(data: FriendInput, db: Session = Depends(get_db)):
         if existing.status == "accepted": return {"message": "Já são amigos"}
         return {"message": "Solicitação já existe"}
     
-    new_req = FriendRequest(sender_id=data.sender_id, receiver_id=data.target_id, status="pending")
+    new_req = FriendRequest(sender_id=current_user.id, receiver_id=data.target_id, status="pending")
     db.add(new_req)
     db.commit()
     return {"message": "Solicitação enviada"}
@@ -1468,36 +1548,14 @@ def get_pending_requests(user_id: int, db: Session = Depends(get_db)):
             })
     return results
 
-
-
-# --- ADICIONE ESTA ROTA QUE ESTAVA FALTANDO ---
-@app.get("/api/user/{user_id}/pending_requests")
-def get_pending_requests(user_id: int, db: Session = Depends(get_db)):
-    # Busca solicitações onde EU sou o recebedor (receiver_id) e status é 'pending'
-    requests = db.query(FriendRequest).filter(
-        FriendRequest.receiver_id == user_id,
-        FriendRequest.status == "pending"
-    ).all()
-    
-    results = []
-    for req in requests:
-        sender = db.query(User).filter(User.id == req.sender_id).first()
-        if sender:
-            results.append({
-                "request_id": req.id,
-                "sender_id": sender.id,
-                "username": sender.username,
-                "nickname": sender.nickname or sender.username,
-                "avatar_url": sender.avatar_url
-            })
-    return results
-
+# Rota protegida: Aceitar requisição segura
 @app.post("/api/friend/accept")
-def accept_friend_request(data: FriendInput, db: Session = Depends(get_db)):
-    # Procura o pedido onde o remetente é quem enviou (sender_id) e o destinatário sou eu (target_id)
+def accept_friend_request(data: FriendInput, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    # Procura o pedido onde o remetente é quem enviou (sender_id da request) e o destinatário SOU EU (current_user)
+    # A variável data.sender_id vem do JSON (quem enviou o pedido)
     req = db.query(FriendRequest).filter(
         (FriendRequest.sender_id == data.sender_id) & 
-        (FriendRequest.receiver_id == data.target_id)
+        (FriendRequest.receiver_id == current_user.id)
     ).first()
     
     if not req: 
@@ -1507,8 +1565,13 @@ def accept_friend_request(data: FriendInput, db: Session = Depends(get_db)):
     db.commit()
     return {"message": "Agora vocês são amigos!"}
 
+# Rota protegida: Remover amigo seguro
 @app.delete("/api/friend/remove")
-def remove_friend(sender_id: int, target_id: int, db: Session = Depends(get_db)):
+def remove_friend(sender_id: int, target_id: int, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    # Garante que quem está deletando faz parte da relação (ou é o sender ou é o receiver)
+    if current_user.id != sender_id and current_user.id != target_id:
+        raise HTTPException(status_code=403, detail="Não autorizado")
+
     # Procura a relação em qualquer direção para deletar (serve para recusar ou desfazer amizade)
     req = db.query(FriendRequest).filter(
         or_(
@@ -2257,20 +2320,20 @@ def get_top_discussions(db: Session = Depends(get_db)):
     return results[:20]
 
 @app.post("/api/discussions")
-def create_discussion(data: DiscussionInput, db: Session = Depends(get_db)):
+def create_discussion(data: DiscussionInput, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     try:
         new_disc = Discussion(
             title=data.title,
             content=data.content,
             game_id=data.game_id,
             game_name=data.game_name,
-            user_id=data.user_id
+            user_id=current_user.id # Pega do token seguro
         )
         db.add(new_disc)
         
         # XP para o criador
-        user = db.query(User).filter(User.id == data.user_id).first()
-        if user: user.xp += 20
+        user = current_user
+        user.xp += 20
         
         db.commit()
         return {"message": "Discussão criada!"}
@@ -2279,11 +2342,11 @@ def create_discussion(data: DiscussionInput, db: Session = Depends(get_db)):
         return {"error": str(e)}
 
 @app.post("/api/discussions/vote")
-def vote_discussion(data: VoteInput, db: Session = Depends(get_db)):
+def vote_discussion(data: VoteInput, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     # Verifica se já votou
     existing = db.query(DiscussionVote).filter(
         DiscussionVote.discussion_id == data.discussion_id, 
-        DiscussionVote.user_id == data.user_id
+        DiscussionVote.user_id == current_user.id
     ).first()
     
     if existing:
@@ -2297,7 +2360,7 @@ def vote_discussion(data: VoteInput, db: Session = Depends(get_db)):
             db.commit()
             return {"status": "updated"}
     else:
-        new_vote = DiscussionVote(discussion_id=data.discussion_id, user_id=data.user_id, vote_type=data.vote_type)
+        new_vote = DiscussionVote(discussion_id=data.discussion_id, user_id=current_user.id, vote_type=data.vote_type)
         db.add(new_vote)
         db.commit()
         return {"status": "created"}
@@ -2321,11 +2384,11 @@ def get_discussion_comments(discussion_id: int, db: Session = Depends(get_db)):
     return results
 
 @app.post("/api/discussions/comment")
-def post_discussion_comment(data: DiscussionCommentInput, db: Session = Depends(get_db)):
+def post_discussion_comment(data: DiscussionCommentInput, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     try:
         new_comment = DiscussionComment(
             discussion_id=data.discussion_id,
-            user_id=data.user_id,
+            user_id=current_user.id,
             content=data.content
         )
         db.add(new_comment)
