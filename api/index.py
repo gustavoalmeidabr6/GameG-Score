@@ -833,7 +833,7 @@ def toggle_tierlist_like(tierlist_id: int, like_data: TierlistLikeInput, current
         return {"status": "liked"}
 
 # ==============================================================================
-#  DEMAIS ROTAS (MANTIDAS)
+#  DEMAIS ROTAS (MANTIDAS
 # ==============================================================================
 
 
