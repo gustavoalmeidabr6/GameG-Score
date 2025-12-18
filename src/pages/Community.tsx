@@ -1,6 +1,10 @@
 import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
-import { ArrowLeft, Search, User, Trophy, Medal, Crown, MessageSquare, List, Heart, ExternalLink, Gamepad2 } from "lucide-react";
+import { 
+  ArrowLeft, Search, User, Trophy, Medal, Crown, MessageSquare, 
+  List, Heart, ExternalLink, Gamepad2, ThumbsUp, ThumbsDown, 
+  Plus, Send, X 
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import welcomeBg from "@/assets/welcome-bg.jpg";
@@ -8,6 +12,10 @@ import { toast } from "sonner";
 import defaultAvatar from "@/assets/defaultprofile.png";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
+import { Textarea } from "@/components/ui/textarea";
+import { ScrollArea } from "@/components/ui/scroll-area";
+import { Badge } from "@/components/ui/badge";
 
 export default function Community() {
   const navigate = useNavigate();
@@ -16,23 +24,41 @@ export default function Community() {
   const [topUsers, setTopUsers] = useState<any[]>([]); 
   const [topComments, setTopComments] = useState<any[]>([]);
   const [topTierlists, setTopTierlists] = useState<any[]>([]);
+  const [discussions, setDiscussions] = useState<any[]>([]); // Estado para discussões
   const [loading, setLoading] = useState(false);
+
+  // Estados para Criar Discussão
+  const [newDiscOpen, setNewDiscOpen] = useState(false);
+  const [newDiscTitle, setNewDiscTitle] = useState("");
+  const [newDiscContent, setNewDiscContent] = useState("");
+  const [gameSearchQuery, setGameSearchQuery] = useState("");
+  const [gameSearchResults, setGameSearchResults] = useState<any[]>([]);
+  const [selectedGame, setSelectedGame] = useState<{id: number, name: string} | null>(null);
+
+  // Estados para Visualizar Discussão (Comentários)
+  const [viewDisc, setViewDisc] = useState<any | null>(null);
+  const [discComments, setDiscComments] = useState<any[]>([]);
+  const [newCommentText, setNewCommentText] = useState("");
 
   useEffect(() => {
     const fetchInitialData = async () => {
       try {
-        const topRes = await fetch('/api/users/top');
-        if (topRes.ok) setTopUsers(await topRes.json());
-
         setLoading(true);
-        const searchRes = await fetch('/api/users/search');
+        
+        // Fetch paralelo para não travar
+        const [topRes, searchRes, commentsRes, tierlistsRes, discRes] = await Promise.all([
+            fetch('/api/users/top'),
+            fetch('/api/users/search'),
+            fetch('/api/community/top_comments'),
+            fetch('/api/community/top_tierlists'),
+            fetch('/api/discussions/top') // Nova rota
+        ]);
+
+        if (topRes.ok) setTopUsers(await topRes.json());
         if (searchRes.ok) setUsers(await searchRes.json());
-        
-        const commentsRes = await fetch('/api/community/top_comments');
         if (commentsRes.ok) setTopComments(await commentsRes.json());
-        
-        const tierlistsRes = await fetch('/api/community/top_tierlists');
         if (tierlistsRes.ok) setTopTierlists(await tierlistsRes.json());
+        if (discRes.ok) setDiscussions(await discRes.json());
         
         setLoading(false);
       } catch (error) {
@@ -42,38 +68,136 @@ export default function Community() {
     fetchInitialData();
   }, []);
 
-  // Live Search
+  // Live Search Usuários
   useEffect(() => {
     const delayDebounceFn = setTimeout(() => {
-      setLoading(true);
       const url = query.trim() 
         ? `/api/users/search?q=${encodeURIComponent(query)}` 
         : `/api/users/search`;
 
       fetch(url)
         .then(res => res.json())
-        .then(data => {
-          setUsers(data);
-          setLoading(false);
-        })
-        .catch(err => {
-          console.error(err);
-          setLoading(false);
-        });
+        .then(data => setUsers(data))
+        .catch(err => console.error(err));
     }, 500);
     return () => clearTimeout(delayDebounceFn);
   }, [query]);
 
-  // ALTERAÇÃO AQUI: Agora recebe uma string (username) em vez de number (id)
-  const handleViewProfile = (username: string) => navigate(`/profile/${username}`); 
-
-  const handleLikeTierlist = async (e: React.MouseEvent, tierlistId: number) => {
-    e.stopPropagation(); // Evita navegar ao clicar no like
-    const userId = localStorage.getItem("userId");
-    if (!userId) {
-        toast.error("Faça login para curtir!");
+  // Live Search Jogos (Para criar discussão)
+  useEffect(() => {
+    if (!gameSearchQuery.trim()) {
+        setGameSearchResults([]);
         return;
     }
+    const delayDebounceFn = setTimeout(() => {
+      fetch(`/api/search?q=${encodeURIComponent(gameSearchQuery)}`)
+        .then(res => res.json())
+        .then(data => setGameSearchResults(data))
+        .catch(err => console.error(err));
+    }, 500);
+    return () => clearTimeout(delayDebounceFn);
+  }, [gameSearchQuery]);
+
+  const handleViewProfile = (username: string) => navigate(`/profile/${username}`); 
+
+  // --- LÓGICA DE DISCUSSÕES ---
+
+  const handleCreateDiscussion = async () => {
+    const userId = localStorage.getItem("userId");
+    if (!userId) return toast.error("Faça login para criar uma discussão.");
+    if (!newDiscTitle.trim() || !newDiscContent.trim()) return toast.error("Preencha título e conteúdo.");
+
+    try {
+        const res = await fetch("/api/discussions", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+                title: newDiscTitle,
+                content: newDiscContent,
+                game_id: selectedGame?.id,
+                game_name: selectedGame?.name,
+                user_id: parseInt(userId)
+            })
+        });
+        if (res.ok) {
+            toast.success("Discussão criada!");
+            setNewDiscOpen(false);
+            setNewDiscTitle(""); setNewDiscContent(""); setSelectedGame(null);
+            // Recarrega a lista
+            const discRes = await fetch('/api/discussions/top');
+            if (discRes.ok) setDiscussions(await discRes.json());
+        } else {
+            toast.error("Erro ao criar discussão.");
+        }
+    } catch (e) { toast.error("Erro de conexão."); }
+  };
+
+  const handleVote = async (e: React.MouseEvent, discId: number, type: number) => {
+    e.stopPropagation();
+    const userId = localStorage.getItem("userId");
+    if (!userId) return toast.error("Faça login para votar.");
+
+    try {
+        const res = await fetch("/api/discussions/vote", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ user_id: parseInt(userId), discussion_id: discId, vote_type: type })
+        });
+        
+        if (res.ok) {
+            // Atualização otimista da UI
+            setDiscussions(prev => prev.map(d => {
+                if (d.id === discId) {
+                    // Lógica simplificada: Se eu der like, aumenta 1. Se der dislike, diminui 1.
+                    // Num app real, checaríamos se o usuario ja tinha votado para ajustar corretamente (+2 ou -2 etc)
+                    // Aqui vamos apenas incrementar/decrementar visualmente
+                    return { ...d, score: d.score + type }; 
+                }
+                return d;
+            }));
+        }
+    } catch (e) { toast.error("Erro ao votar."); }
+  };
+
+  const openDiscussionDetails = async (disc: any) => {
+      setViewDisc(disc);
+      // Carregar comentários
+      const res = await fetch(`/api/discussions/${disc.id}/comments`);
+      if (res.ok) setDiscComments(await res.json());
+  };
+
+  const handlePostComment = async () => {
+      const userId = localStorage.getItem("userId");
+      if (!userId) return toast.error("Login necessário.");
+      if (!newCommentText.trim()) return;
+
+      try {
+          const res = await fetch("/api/discussions/comment", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                  discussion_id: viewDisc.id,
+                  user_id: parseInt(userId),
+                  content: newCommentText
+              })
+          });
+          if (res.ok) {
+              setNewCommentText("");
+              // Recarrega comentários
+              const cRes = await fetch(`/api/discussions/${viewDisc.id}/comments`);
+              if (cRes.ok) setDiscComments(await cRes.json());
+              
+              // Atualiza contador na lista principal
+              setDiscussions(prev => prev.map(d => d.id === viewDisc.id ? {...d, comment_count: d.comment_count + 1} : d));
+          }
+      } catch(e) { toast.error("Erro ao comentar."); }
+  };
+
+  // --- LÓGICA DE TIERLISTS ---
+  const handleLikeTierlist = async (e: React.MouseEvent, tierlistId: number) => {
+    e.stopPropagation(); 
+    const userId = localStorage.getItem("userId");
+    if (!userId) return toast.error("Faça login para curtir!");
 
     try {
         const res = await fetch(`/api/tierlist/${tierlistId}/like`, {
@@ -142,16 +266,22 @@ export default function Community() {
                   <TabsTrigger value="users" className="text-xs md:text-sm gap-2">
                      <User className="w-4 h-4" /> Jogadores
                   </TabsTrigger>
+                  
+                  {/* NOVA ABA DE DISCUSSÕES */}
+                  <TabsTrigger value="discussions" className="text-xs md:text-sm gap-2">
+                     <MessageSquare className="w-4 h-4" /> Discussões
+                  </TabsTrigger>
+
                   <TabsTrigger value="tierlists" className="text-xs md:text-sm gap-2">
                      <List className="w-4 h-4" /> Tierlists
                   </TabsTrigger>
                   <TabsTrigger value="comments" className="text-xs md:text-sm gap-2">
-                     <MessageSquare className="w-4 h-4" /> Comentários
+                     <Heart className="w-4 h-4" /> Comentários
                   </TabsTrigger>
                </TabsList>
             </div>
 
-            {/* ABA JOGADORES */}
+            {/* ABA JOGADORES (MANTIDA) */}
             <TabsContent value="users" className="animate-in fade-in slide-in-from-bottom-4">
               <div className="space-y-8">
                 <div className="relative w-full max-w-xl mx-auto">
@@ -174,7 +304,6 @@ export default function Community() {
                         {topUsers.map((user, index) => (
                         <div 
                             key={user.id}
-                            // ALTERAÇÃO: Passando user.username
                             onClick={() => handleViewProfile(user.username)}
                             className="flex items-center gap-4 p-4 glass-panel rounded-xl border border-white/5 hover:border-yellow-500/50 transition-all cursor-pointer bg-black/40"
                         >
@@ -207,7 +336,6 @@ export default function Community() {
                         {users.map((user) => (
                         <div 
                             key={user.id}
-                            // ALTERAÇÃO: Passando user.username
                             onClick={() => handleViewProfile(user.username)}
                             className="flex items-center gap-3 p-3 glass-panel rounded-lg border border-white/5 hover:border-primary transition-all cursor-pointer bg-black/40"
                         >
@@ -226,7 +354,211 @@ export default function Community() {
               </div>
             </TabsContent>
 
-            {/* ABA TIERLISTS POPULARES */}
+            {/* --- NOVA ABA: DISCUSSÕES --- */}
+            <TabsContent value="discussions" className="animate-in fade-in slide-in-from-bottom-4">
+                <div className="max-w-4xl mx-auto">
+                    
+                    {/* Botão Criar */}
+                    <div className="flex justify-between items-center mb-6">
+                        <h2 className="text-2xl font-bold text-white font-pixel tracking-wide">Fórum da Comunidade</h2>
+                        <Dialog open={newDiscOpen} onOpenChange={setNewDiscOpen}>
+                            <DialogTrigger asChild>
+                                <Button className="bg-primary text-black font-bold hover:bg-primary/80">
+                                    <Plus className="w-4 h-4 mr-2" /> Criar Discussão
+                                </Button>
+                            </DialogTrigger>
+                            <DialogContent className="bg-[#121214] border border-white/10 text-white sm:max-w-lg">
+                                <DialogHeader>
+                                    <DialogTitle>Nova Discussão</DialogTitle>
+                                </DialogHeader>
+                                <div className="space-y-4 mt-4">
+                                    <Input 
+                                        placeholder="Título da discussão" 
+                                        value={newDiscTitle}
+                                        onChange={(e) => setNewDiscTitle(e.target.value)}
+                                        className="bg-black/50 border-white/10"
+                                    />
+                                    
+                                    {/* Busca de Jogo Simples */}
+                                    <div className="relative">
+                                        <div className="flex items-center gap-2 mb-2">
+                                            <Gamepad2 className="w-4 h-4 text-gray-400" />
+                                            <span className="text-sm text-gray-400">Jogo Relacionado (Opcional)</span>
+                                        </div>
+                                        {!selectedGame ? (
+                                            <div className="relative">
+                                                <Input 
+                                                    placeholder="Buscar jogo..." 
+                                                    value={gameSearchQuery}
+                                                    onChange={(e) => setGameSearchQuery(e.target.value)}
+                                                    className="bg-black/50 border-white/10"
+                                                />
+                                                {gameSearchResults.length > 0 && (
+                                                    <div className="absolute top-full left-0 right-0 bg-[#1A1A1A] border border-white/10 z-50 rounded-b-md max-h-40 overflow-y-auto">
+                                                        {gameSearchResults.map(g => (
+                                                            <div 
+                                                                key={g.id}
+                                                                className="p-2 hover:bg-white/10 cursor-pointer flex items-center gap-2"
+                                                                onClick={() => {
+                                                                    setSelectedGame({id: g.id, name: g.name});
+                                                                    setGameSearchQuery("");
+                                                                    setGameSearchResults([]);
+                                                                }}
+                                                            >
+                                                                <img src={g.image?.thumb_url} className="w-6 h-6 rounded object-cover" />
+                                                                <span className="text-xs truncate">{g.name}</span>
+                                                            </div>
+                                                        ))}
+                                                    </div>
+                                                )}
+                                            </div>
+                                        ) : (
+                                            <div className="flex items-center justify-between p-2 bg-primary/10 border border-primary/30 rounded-md">
+                                                <span className="text-sm font-bold text-primary">{selectedGame.name}</span>
+                                                <Button size="icon" variant="ghost" className="h-6 w-6" onClick={() => setSelectedGame(null)}>
+                                                    <X className="w-4 h-4" />
+                                                </Button>
+                                            </div>
+                                        )}
+                                    </div>
+
+                                    <Textarea 
+                                        placeholder="O que você quer discutir?" 
+                                        value={newDiscContent}
+                                        onChange={(e) => setNewDiscContent(e.target.value)}
+                                        className="bg-black/50 border-white/10 min-h-[150px]"
+                                    />
+                                    <Button onClick={handleCreateDiscussion} className="w-full bg-primary text-black font-bold">
+                                        Publicar
+                                    </Button>
+                                </div>
+                            </DialogContent>
+                        </Dialog>
+                    </div>
+
+                    {/* Lista de Discussões */}
+                    <div className="space-y-4">
+                        {discussions.map((disc) => (
+                            <div key={disc.id} className="flex gap-4 bg-black/40 border border-white/5 rounded-xl p-4 hover:border-white/10 transition-all">
+                                {/* Votos (Lateral Esquerda estilo Reddit) */}
+                                <div className="flex flex-col items-center gap-1 min-w-[40px]">
+                                    <button onClick={(e) => handleVote(e, disc.id, 1)} className="text-gray-500 hover:text-primary transition-colors">
+                                        <ThumbsUp className="w-5 h-5" />
+                                    </button>
+                                    <span className={`font-bold text-sm ${disc.score > 0 ? 'text-primary' : disc.score < 0 ? 'text-red-500' : 'text-gray-400'}`}>
+                                        {disc.score}
+                                    </span>
+                                    <button onClick={(e) => handleVote(e, disc.id, -1)} className="text-gray-500 hover:text-red-500 transition-colors">
+                                        <ThumbsDown className="w-5 h-5" />
+                                    </button>
+                                </div>
+
+                                {/* Conteúdo */}
+                                <div className="flex-1 cursor-pointer" onClick={() => openDiscussionDetails(disc)}>
+                                    <div className="flex items-center gap-2 mb-1">
+                                        {disc.game_name && (
+                                            <Badge variant="outline" className="text-[10px] border-primary/30 text-primary bg-primary/5">
+                                                <Gamepad2 className="w-3 h-3 mr-1" /> {disc.game_name}
+                                            </Badge>
+                                        )}
+                                        <span className="text-xs text-gray-500">
+                                            Postado por <strong className="text-gray-300 hover:text-white" onClick={(e) => { e.stopPropagation(); handleViewProfile(disc.author.username); }}>{disc.author.nickname}</strong>
+                                        </span>
+                                    </div>
+                                    <h3 className="text-lg font-bold text-white mb-2 leading-tight">{disc.title}</h3>
+                                    <p className="text-sm text-gray-400 line-clamp-3 mb-3">
+                                        {disc.content}
+                                    </p>
+                                    <div className="flex items-center gap-4 text-xs text-gray-500">
+                                        <div className="flex items-center gap-1 hover:bg-white/5 px-2 py-1 rounded">
+                                            <MessageSquare className="w-4 h-4" />
+                                            {disc.comment_count} Comentários
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        ))}
+                        {discussions.length === 0 && (
+                            <div className="text-center py-20 text-gray-500 bg-black/20 rounded-xl">
+                                <MessageSquare className="w-12 h-12 mx-auto mb-4 opacity-20" />
+                                <p>Nenhuma discussão criada ainda. Seja o primeiro!</p>
+                            </div>
+                        )}
+                    </div>
+                </div>
+
+                {/* MODAL DE DETALHES DA DISCUSSÃO */}
+                <Dialog open={!!viewDisc} onOpenChange={(o) => !o && setViewDisc(null)}>
+                    <DialogContent className="bg-[#0A0A0A] border border-white/10 text-white sm:max-w-2xl h-[80vh] flex flex-col p-0 overflow-hidden">
+                        {viewDisc && (
+                            <>
+                                <DialogHeader className="p-6 pb-2 bg-[#121214] border-b border-white/5">
+                                    {viewDisc.game_name && (
+                                        <Badge className="w-fit mb-2 bg-primary/10 text-primary hover:bg-primary/20">{viewDisc.game_name}</Badge>
+                                    )}
+                                    <DialogTitle className="text-xl leading-tight">{viewDisc.title}</DialogTitle>
+                                    <div className="flex items-center gap-2 mt-2 text-xs text-gray-400">
+                                        <Avatar className="w-6 h-6">
+                                            <AvatarImage src={viewDisc.author.avatar_url || defaultAvatar} />
+                                        </Avatar>
+                                        <span>{viewDisc.author.nickname}</span>
+                                        <span>•</span>
+                                        <span>{new Date(viewDisc.created_at).toLocaleDateString()}</span>
+                                    </div>
+                                </DialogHeader>
+                                
+                                <ScrollArea className="flex-1 p-6">
+                                    <div className="text-gray-300 text-sm leading-relaxed mb-8 whitespace-pre-wrap">
+                                        {viewDisc.content}
+                                    </div>
+
+                                    <div className="border-t border-white/10 pt-6">
+                                        <h4 className="text-sm font-bold text-gray-400 mb-4 flex items-center gap-2">
+                                            <MessageSquare className="w-4 h-4" /> Comentários
+                                        </h4>
+                                        <div className="space-y-6">
+                                            {discComments.map((c) => (
+                                                <div key={c.id} className="flex gap-3">
+                                                    <Avatar className="w-8 h-8 mt-1 border border-white/10 cursor-pointer" onClick={() => { setViewDisc(null); handleViewProfile(c.author.username); }}>
+                                                        <AvatarImage src={c.author.avatar_url || defaultAvatar} />
+                                                    </Avatar>
+                                                    <div className="flex-1">
+                                                        <div className="bg-[#1A1A1A] p-3 rounded-lg rounded-tl-none border border-white/5">
+                                                            <div className="flex justify-between items-center mb-1">
+                                                                <span className="text-xs font-bold text-primary cursor-pointer" onClick={() => { setViewDisc(null); handleViewProfile(c.author.username); }}>{c.author.nickname}</span>
+                                                                <span className="text-[10px] text-gray-600">{new Date(c.created_at).toLocaleDateString()}</span>
+                                                            </div>
+                                                            <p className="text-xs text-gray-300">{c.content}</p>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            ))}
+                                            {discComments.length === 0 && <p className="text-xs text-gray-600 italic">Sem comentários.</p>}
+                                        </div>
+                                    </div>
+                                </ScrollArea>
+
+                                <div className="p-4 bg-[#121214] border-t border-white/10">
+                                    <div className="flex gap-2">
+                                        <Input 
+                                            placeholder="Escreva um comentário..." 
+                                            value={newCommentText}
+                                            onChange={(e) => setNewCommentText(e.target.value)}
+                                            className="bg-black border-white/10"
+                                            onKeyDown={(e) => e.key === 'Enter' && handlePostComment()}
+                                        />
+                                        <Button size="icon" onClick={handlePostComment} className="bg-primary text-black">
+                                            <Send className="w-4 h-4" />
+                                        </Button>
+                                    </div>
+                                </div>
+                            </>
+                        )}
+                    </DialogContent>
+                </Dialog>
+            </TabsContent>
+
+            {/* ABA TIERLISTS POPULARES (MANTIDA) */}
             <TabsContent value="tierlists" className="animate-in fade-in slide-in-from-bottom-4">
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
                     {topTierlists.map((tier) => {
@@ -252,7 +584,6 @@ export default function Community() {
                                 
                                 <div 
                                     className="flex items-center gap-2 text-sm text-gray-400 mb-4 cursor-pointer hover:text-white transition-colors"
-                                    // ALTERAÇÃO: Passando tier.author.username
                                     onClick={() => handleViewProfile(tier.author.username)}
                                 >
                                     <Avatar className="w-6 h-6 border border-white/10">
@@ -287,13 +618,12 @@ export default function Community() {
                 </div>
             </TabsContent>
 
-            {/* ABA TOP COMENTÁRIOS */}
+            {/* ABA TOP COMENTÁRIOS (MANTIDA) */}
             <TabsContent value="comments" className="animate-in fade-in slide-in-from-bottom-4">
                 <div className="space-y-4 max-w-3xl mx-auto">
                     {topComments.map((comment) => (
                         <div key={comment.id} className="glass-panel p-6 rounded-xl border border-white/5 hover:border-primary/30 transition-all bg-black/40">
                             <div className="flex justify-between items-start mb-3">
-                                {/* ALTERAÇÃO: Passando comment.author.username */}
                                 <div className="flex items-center gap-2 cursor-pointer group" onClick={() => handleViewProfile(comment.author.username)}>
                                     <Avatar className="w-8 h-8 border border-white/10 group-hover:border-primary">
                                         <AvatarImage src={comment.author.avatar_url || defaultAvatar} />
