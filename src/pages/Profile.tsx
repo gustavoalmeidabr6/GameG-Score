@@ -246,7 +246,10 @@ export default function Profile() {
       try {
           const res = await fetch("/api/user/follow", {
               method: "POST",
-              headers: { "Content-Type": "application/json" },
+              headers: { 
+                "Content-Type": "application/json",
+                "Authorization": `Bearer ${localStorage.getItem("token")}`
+              },
               body: JSON.stringify({ follower_id: parseInt(loggedUserId), followed_id: profile.id })
           });
           
@@ -279,7 +282,10 @@ export default function Profile() {
               // ENVIAR SOLICITAÇÃO
               const res = await fetch("/api/friend/request", {
                   method: "POST", 
-                  headers: { "Content-Type": "application/json" },
+                  headers: { 
+                    "Content-Type": "application/json",
+                    "Authorization": `Bearer ${localStorage.getItem("token")}`
+                  },
                   body: JSON.stringify({ sender_id: parseInt(loggedUserId), target_id: targetId })
               });
               if (res.ok) {
@@ -290,7 +296,10 @@ export default function Profile() {
               // ACEITAR SOLICITAÇÃO (VIA BOTÃO DO HEADER)
               const res = await fetch("/api/friend/accept", {
                   method: "POST", 
-                  headers: { "Content-Type": "application/json" },
+                  headers: { 
+                    "Content-Type": "application/json",
+                    "Authorization": `Bearer ${localStorage.getItem("token")}`
+                  },
                   body: JSON.stringify({ sender_id: parseInt(loggedUserId), target_id: targetId })
               });
               if (res.ok) {
@@ -300,7 +309,12 @@ export default function Profile() {
               }
           } else if (friendStatus === 'friends' || friendStatus === 'pending_sent') {
               // REMOVER AMIGO OU CANCELAR PEDIDO
-              const res = await fetch(`/api/friend/remove?sender_id=${loggedUserId}&target_id=${targetId}`, { method: "DELETE" });
+              const res = await fetch(`/api/friend/remove?sender_id=${loggedUserId}&target_id=${targetId}`, { 
+                  method: "DELETE",
+                  headers: { 
+                    "Authorization": `Bearer ${localStorage.getItem("token")}`
+                  }
+              });
               if (res.ok) {
                   setFriendStatus("none");
                   toast.success("Removido/Cancelado.");
@@ -318,7 +332,10 @@ export default function Profile() {
           // sender_id aqui é quem mandou o pedido, target_id sou eu (quem aceita)
           const res = await fetch("/api/friend/accept", {
               method: "POST",
-              headers: { "Content-Type": "application/json" },
+              headers: { 
+                "Content-Type": "application/json",
+                "Authorization": `Bearer ${localStorage.getItem("token")}`
+              },
               body: JSON.stringify({ sender_id: senderId, target_id: parseInt(loggedUserId) })
           });
           if (res.ok) {
@@ -334,7 +351,12 @@ export default function Profile() {
       if (!loggedUserId) return;
       try {
           // Usa rota de remove, passando quem mandou e quem recusa
-          const res = await fetch(`/api/friend/remove?sender_id=${senderId}&target_id=${loggedUserId}`, { method: "DELETE" });
+          const res = await fetch(`/api/friend/remove?sender_id=${senderId}&target_id=${loggedUserId}`, { 
+              method: "DELETE",
+              headers: { 
+                "Authorization": `Bearer ${localStorage.getItem("token")}`
+              }
+          });
           if (res.ok) {
               toast.success("Solicitação recusada.");
               setPendingRequests(prev => prev.filter(req => req.sender_id !== senderId));
@@ -351,7 +373,10 @@ export default function Profile() {
     try {
         const res = await fetch("/api/profile/favorites", {
             method: "POST",
-            headers: { "Content-Type": "application/json" },
+            headers: { 
+                "Content-Type": "application/json",
+                "Authorization": `Bearer ${localStorage.getItem("token")}`
+            },
             body: JSON.stringify({ user_id: parseInt(loggedUserId!), game_ids: selectedFavorites })
         });
         if (res.ok) {
@@ -366,7 +391,12 @@ export default function Profile() {
     if (!window.confirm("Tem certeza que deseja excluir esta Tierlist?")) return;
     const loggedUserId = localStorage.getItem("userId");
     try {
-      const res = await fetch(`/api/tierlist/${tierlistId}?owner_id=${loggedUserId}`, { method: "DELETE" });
+      const res = await fetch(`/api/tierlist/${tierlistId}?owner_id=${loggedUserId}`, { 
+          method: "DELETE",
+          headers: { 
+              "Authorization": `Bearer ${localStorage.getItem("token")}`
+          }
+      });
       if (res.ok) {
         toast.success("Tierlist excluída!");
         setAllTierlists(prev => prev.filter(t => t.id !== tierlistId));
