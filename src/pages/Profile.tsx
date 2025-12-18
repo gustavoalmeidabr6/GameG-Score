@@ -129,6 +129,15 @@ export default function Profile() {
 
       if (response.ok) {
         const data = await response.json();
+
+        // --- CORREÇÃO DE URL: Se estiver em /profile sem ID, redireciona para /profile/USERNAME ---
+        if (!username && data.username) {
+            // Atualiza a URL para incluir o username sem recarregar a página inteira,
+            // mas forçando o Router a reconhecer o novo caminho.
+            navigate(`/profile/${data.username}`, { replace: true });
+            return; // Interrompe a execução atual para que o useEffect rode novamente com o novo username
+        }
+
         setProfile(data);
         realId = data.id; // Captura o ID real do banco
         
@@ -659,19 +668,19 @@ export default function Profile() {
             <div className="flex justify-center mb-8">
               <TabsList className="bg-black/60 border border-primary/20 p-1 grid grid-cols-5 w-full max-w-4xl h-auto">
                 <TabsTrigger value="overview" className="data-[state=active]:bg-primary data-[state=active]:text-black text-xs md:text-sm py-2">
-                   <Award className="w-4 h-4 mr-2 hidden md:inline" /> Visão Geral
+                    <Award className="w-4 h-4 mr-2 hidden md:inline" /> Visão Geral
                 </TabsTrigger>
                 <TabsTrigger value="steam" className="data-[state=active]:bg-primary data-[state=active]:text-black text-xs md:text-sm py-2">
-                   <LinkIcon className="w-4 h-4 mr-2 hidden md:inline" /> Redes & Social
+                    <LinkIcon className="w-4 h-4 mr-2 hidden md:inline" /> Redes & Social
                 </TabsTrigger>
                 <TabsTrigger value="library" className="data-[state=active]:bg-primary data-[state=active]:text-black text-xs md:text-sm py-2">
-                   <Gamepad2 className="w-4 h-4 mr-2 hidden md:inline" /> Jogos ({allGames.length})
+                    <Gamepad2 className="w-4 h-4 mr-2 hidden md:inline" /> Jogos ({allGames.length})
                 </TabsTrigger>
                 <TabsTrigger value="quiz" className="data-[state=active]:bg-primary data-[state=active]:text-black text-xs md:text-sm py-2">
                     <BrainCircuit className="w-4 h-4 mr-2 hidden md:inline" /> Quiz
                 </TabsTrigger>
                 <TabsTrigger value="tierlists" className="data-[state=active]:bg-primary data-[state=active]:text-black text-xs md:text-sm py-2">
-                   <List className="w-4 h-4 mr-2 hidden md:inline" /> Tierlists ({allTierlists.length})
+                    <List className="w-4 h-4 mr-2 hidden md:inline" /> Tierlists ({allTierlists.length})
                 </TabsTrigger>
               </TabsList>
             </div>
@@ -880,7 +889,7 @@ export default function Profile() {
                 <div className="glass-panel rounded-2xl border-2 border-[#1b2838] bg-[#0f1114] p-8 min-h-[50vh] flex flex-col items-center justify-center">
                     <h2 className="text-2xl font-bold text-white mb-2">Redes Conectadas</h2>
                     <p className="text-gray-400 mb-10 text-center max-w-lg">
-                       Links oficiais para os perfis deste jogador.
+                        Links oficiais para os perfis deste jogador.
                     </p>
 
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-6 w-full max-w-4xl">
@@ -1057,7 +1066,7 @@ export default function Profile() {
                                 <div className="mb-8">
                                     <div className="flex justify-between items-center mb-2 px-4">
                                         <span className="text-primary font-pixel text-xs uppercase tracking-widest">
-                                          QUESTÃO {currentQuestionIndex + 1} / 10
+                                            QUESTÃO {currentQuestionIndex + 1} / 10
                                         </span>
                                         <span className="text-white font-bold text-xs bg-primary/20 px-2 py-1 rounded">
                                             SCORE: {quizScore}
@@ -1086,15 +1095,29 @@ export default function Profile() {
                                                 </div>
                                                 <Slider
                                                     disabled={answerState !== 'idle'}
-                                                    defaultValue={[5.0]}
+                                                    value={sliderValue}
                                                     max={10}
-                                                    step={0.5}
+                                                    step={0.1}
                                                     onValueChange={(vals) => setSliderValue(vals)}
                                                     className="py-4 cursor-grab active:cursor-grabbing"
                                                 />
-                                                <div className="mt-4 text-center">
-                                                    <span className="text-5xl font-black font-pixel text-primary">{sliderValue[0].toFixed(1)}</span>
-                                                    <p className="text-xs text-gray-400 mt-1 uppercase">Seu Palpite</p>
+                                                <div className="mt-4 flex flex-col items-center justify-center">
+                                                   <Input 
+                                                      type="number" 
+                                                      min={0}
+                                                      max={10}
+                                                      step={0.1}
+                                                      value={sliderValue[0]}
+                                                      onChange={(e) => {
+                                                         const val = parseFloat(e.target.value);
+                                                         if (!isNaN(val) && val >= 0 && val <= 10) {
+                                                             setSliderValue([val]);
+                                                         }
+                                                      }}
+                                                      disabled={answerState !== 'idle'}
+                                                      className="w-32 h-16 text-center text-4xl font-black font-pixel text-primary bg-black/20 border-primary/30 focus:border-primary transition-colors"
+                                                   />
+                                                    <p className="text-xs text-gray-400 mt-2 uppercase">Seu Palpite</p>
                                                 </div>
                                             </div>
                                             {answerState === 'idle' ? (
@@ -1369,7 +1392,7 @@ export default function Profile() {
                   </h3>
                   
                   {loadingSecondary && allGames.length === 0 ? (
-                     <div className="flex justify-center py-20"><Loader2 className="w-10 h-10 text-primary animate-spin" /></div>
+                      <div className="flex justify-center py-20"><Loader2 className="w-10 h-10 text-primary animate-spin" /></div>
                   ) : allGames.length > 0 ? (
                     <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-5 gap-4">
                       {allGames.map((game) => (
@@ -1400,8 +1423,8 @@ export default function Profile() {
                     </div>
                   ) : (
                     <div className="flex flex-col items-center justify-center py-20 text-gray-500">
-                       <Gamepad2 className="w-16 h-16 mb-4 opacity-20" />
-                       <p>Este usuário ainda não avaliou nenhum jogo.</p>
+                        <Gamepad2 className="w-16 h-16 mb-4 opacity-20" />
+                        <p>Este usuário ainda não avaliou nenhum jogo.</p>
                     </div>
                   )}
                 </div>
@@ -1415,14 +1438,14 @@ export default function Profile() {
                       <span className="text-primary">📊</span> Tierlists Criadas
                     </h3>
                     {isOwner && (
-                       <Button onClick={() => navigate("/tierlist")} size="sm" className="bg-primary text-black hover:bg-primary/90">
-                         Nova Tierlist
-                       </Button>
+                        <Button onClick={() => navigate("/tierlist")} size="sm" className="bg-primary text-black hover:bg-primary/90">
+                          Nova Tierlist
+                        </Button>
                     )}
                   </div>
 
                   {loadingSecondary && allTierlists.length === 0 ? (
-                     <div className="flex justify-center py-20"><Loader2 className="w-10 h-10 text-primary animate-spin" /></div>
+                      <div className="flex justify-center py-20"><Loader2 className="w-10 h-10 text-primary animate-spin" /></div>
                   ) : allTierlists.length > 0 ? (
                     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                        {allTierlists.map((tier) => (
