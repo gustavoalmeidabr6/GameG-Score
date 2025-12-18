@@ -103,20 +103,23 @@ export default function Community() {
   // --- LÓGICA DE DISCUSSÕES ---
 
   const handleCreateDiscussion = async () => {
-    const userId = localStorage.getItem("userId");
-    if (!userId) return toast.error("Faça login para criar uma discussão.");
+    const token = localStorage.getItem("token");
+    if (!token) return toast.error("Faça login para criar uma discussão.");
     if (!newDiscTitle.trim() || !newDiscContent.trim()) return toast.error("Preencha título e conteúdo.");
 
     try {
         const res = await fetch("/api/discussions", {
             method: "POST",
-            headers: { "Content-Type": "application/json" },
+            headers: { 
+                "Content-Type": "application/json",
+                "Authorization": `Bearer ${token}` 
+            },
             body: JSON.stringify({
                 title: newDiscTitle,
                 content: newDiscContent,
                 game_id: selectedGame?.id,
-                game_name: selectedGame?.name,
-                user_id: parseInt(userId)
+                game_name: selectedGame?.name
+                // user_id removido (backend pega do token)
             })
         });
         if (res.ok) {
@@ -134,24 +137,45 @@ export default function Community() {
 
   const handleVote = async (e: React.MouseEvent, discId: number, type: number) => {
     e.stopPropagation();
-    const userId = localStorage.getItem("userId");
-    if (!userId) return toast.error("Faça login para votar.");
+    const token = localStorage.getItem("token");
+    if (!token) return toast.error("Faça login para votar.");
 
     try {
         const res = await fetch("/api/discussions/vote", {
             method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ user_id: parseInt(userId), discussion_id: discId, vote_type: type })
+            headers: { 
+                "Content-Type": "application/json",
+                "Authorization": `Bearer ${token}`
+            },
+            body: JSON.stringify({ discussion_id: discId, vote_type: type })
         });
         
         if (res.ok) {
-            // Atualização otimista da UI
+            const data = await res.json(); // { status: "created" | "updated" | "removed" }
+
             setDiscussions(prev => prev.map(d => {
                 if (d.id === discId) {
-                    // Lógica simplificada: Se eu der like, aumenta 1. Se der dislike, diminui 1.
-                    // Num app real, checaríamos se o usuario ja tinha votado para ajustar corretamente (+2 ou -2 etc)
-                    // Aqui vamos apenas incrementar/decrementar visualmente
-                    return { ...d, score: d.score + type }; 
+                    // Lógica para atualizar visualmente sem recarregar tudo
+                    // Assumindo que não temos o estado "user_voted" vindo do backend na lista principal por enquanto,
+                    // vamos apenas incrementar/decrementar baseados na ação.
+                    // Para uma implementação perfeita, o backend deveria retornar o novo score total.
+                    
+                    let newScore = d.score;
+                    
+                    // Se o status for "created" (novo voto), adiciona o valor (+1 ou -1)
+                    if (data.status === "created") {
+                        newScore += type;
+                    } 
+                    // Se for "removed" (clicou no mesmo de novo), remove o valor (-1 ou +1)
+                    else if (data.status === "removed") {
+                        newScore -= type;
+                    }
+                    // Se for "updated" (trocou de like pra dislike ou vice-versa), a diferença é dupla (+2 ou -2)
+                    else if (data.status === "updated") {
+                        newScore += (type * 2); 
+                    }
+                    
+                    return { ...d, score: newScore };
                 }
                 return d;
             }));
@@ -167,17 +191,19 @@ export default function Community() {
   };
 
   const handlePostComment = async () => {
-      const userId = localStorage.getItem("userId");
-      if (!userId) return toast.error("Login necessário.");
+      const token = localStorage.getItem("token");
+      if (!token) return toast.error("Login necessário.");
       if (!newCommentText.trim()) return;
 
       try {
           const res = await fetch("/api/discussions/comment", {
               method: "POST",
-              headers: { "Content-Type": "application/json" },
+              headers: { 
+                  "Content-Type": "application/json",
+                  "Authorization": `Bearer ${token}`
+              },
               body: JSON.stringify({
                   discussion_id: viewDisc.id,
-                  user_id: parseInt(userId),
                   content: newCommentText
               })
           });
@@ -196,14 +222,17 @@ export default function Community() {
   // --- LÓGICA DE TIERLISTS ---
   const handleLikeTierlist = async (e: React.MouseEvent, tierlistId: number) => {
     e.stopPropagation(); 
-    const userId = localStorage.getItem("userId");
-    if (!userId) return toast.error("Faça login para curtir!");
+    const token = localStorage.getItem("token");
+    if (!token) return toast.error("Faça login para curtir!");
 
     try {
         const res = await fetch(`/api/tierlist/${tierlistId}/like`, {
             method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ user_id: parseInt(userId), tierlist_id: tierlistId })
+            headers: { 
+                "Content-Type": "application/json",
+                "Authorization": `Bearer ${token}`
+            },
+            body: JSON.stringify({ tierlist_id: tierlistId })
         });
 
         if (res.ok) {
@@ -373,10 +402,10 @@ export default function Community() {
                                 </DialogHeader>
                                 <div className="space-y-4 mt-4">
                                     <Input 
-                                        placeholder="Título da discussão" 
-                                        value={newDiscTitle}
-                                        onChange={(e) => setNewDiscTitle(e.target.value)}
-                                        className="bg-black/50 border-white/10"
+                                            placeholder="Título da discussão" 
+                                            value={newDiscTitle}
+                                            onChange={(e) => setNewDiscTitle(e.target.value)}
+                                            className="bg-black/50 border-white/10"
                                     />
                                     
                                     {/* Busca de Jogo Simples */}
