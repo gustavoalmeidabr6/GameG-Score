@@ -442,31 +442,67 @@ def search_games(q: str = None):
         response = requests.post(url, headers=headers, data=body)
         games = response.json()
         
-        # --- 1. DEDUPLICAÇÃO INTELIGENTE (PRIORIDADE: MAIS RECENTE) ---
-        # Se houver dois jogos com o nome EXATAMENTE igual (ex: Resident Evil 4),
-        # mantemos apenas o que tiver a data de lançamento mais recente.
-        unique_map = {}
+# --- 1. DEDUPLICAÇÃO INTELIGENTE COM DETECÇÃO DE REMAKES ---
+        
+        # Primeiro, agrupamos jogos por nome limpo
+        name_groups = {}
         
         for g in games:
             # Normaliza o nome para garantir que "Game" e "game " sejam iguais
             clean_name = g.get("name", "").lower().strip()
             
-            if clean_name in unique_map:
-                existing = unique_map[clean_name]
-                
-                # Compara datas (timestamp unix)
-                date_new = g.get("first_release_date", 0) or 0
-                date_existing = existing.get("first_release_date", 0) or 0
-                
-                # Se o jogo atual do loop for mais novo que o que já guardamos, substitui!
-                if date_new > date_existing:
-                    unique_map[clean_name] = g
-            else:
-                unique_map[clean_name] = g
-        
-        # Recupera a lista limpa, agora contendo apenas as versões mais novas de cada nome
-        processed_games = list(unique_map.values())
+            if clean_name not in name_groups:
+                name_groups[clean_name] = []
+            name_groups[clean_name].append(g)
+            
+        processed_games = []
 
+        # Agora analisamos cada grupo
+        for name, group in name_groups.items():
+            if len(group) == 1:
+                # Se só tem um jogo com esse nome, adiciona direto
+                processed_games.append(group[0])
+            else:
+                # Se temos colisão de nomes (Ex: Resident Evil 2 vs Resident Evil 2)
+                # Ordenamos por data de lançamento (do mais antigo para o mais novo)
+                group.sort(key=lambda x: x.get("first_release_date", 0) or 0)
+                
+                # Vamos reconstruir a lista deste grupo, separando Remakes de Ports
+                unique_in_group = []
+                
+                # Pegamos o primeiro (o mais antigo) como referência inicial
+                current_candidate = group[0]
+                
+                for next_game in group[1:]:
+                    date1 = current_candidate.get("first_release_date", 0) or 0
+                    date2 = next_game.get("first_release_date", 0) or 0
+                    
+                    # Diferença em segundos (5 anos = aprox 157 milhões de segundos)
+                    # Se a diferença for maior que 5 anos, assumimos que é um Jogo Novo/Remake
+                    five_years_seconds = 5 * 365 * 24 * 3600
+                    time_gap = abs(date2 - date1)
+                    
+                    if time_gap > five_years_seconds:
+                        # É um Remake! Salva o anterior e define o atual como novo candidato
+                        unique_in_group.append(current_candidate)
+                        current_candidate = next_game
+                    else:
+                        # É um Port ou versão próxima (Ex: PC vs Console)
+                        # Mantemos apenas o que for MAIS POPULAR (maior rating count)
+                        pop1 = current_candidate.get("total_rating_count", 0) or 0
+                        pop2 = next_game.get("total_rating_count", 0) or 0
+                        
+                        if pop2 > pop1:
+                            current_candidate = next_game # Substitui pelo mais famoso
+                        # Se não, mantém o current_candidate quieto
+                
+                # Adiciona o último candidato que sobrou no loop
+                unique_in_group.append(current_candidate)
+                
+                # Adiciona os jogos processados desse grupo na lista final
+                processed_games.extend(unique_in_group)
+
+        # A partir daqui segue seu código normal (Sorting e Penalidades)...
         # --- 2. LÓGICA DE ORDENAÇÃO E PENALIDADES ---
         def sort_key(g):
             name = g.get("name", "").lower().strip()
@@ -489,7 +525,10 @@ def search_games(q: str = None):
             # Critério D: Fama / Popularidade (Desempate final)
             popularity = g.get("total_rating_count", 0) or 0
             
-            return (is_exact, is_base_game, starts_with, popularity)
+            # Critério E: Data de lançamento (Desempate para remakes com nomes parecidos)
+            release_date = g.get("first_release_date", 0) or 0
+
+            return (is_exact, is_base_game, starts_with, popularity, release_date)
 
         # Ordena a lista já limpa
         processed_games.sort(key=sort_key, reverse=True)
