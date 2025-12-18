@@ -392,14 +392,69 @@ def search_games(q: str = None):
     if not headers: return [] 
 
     url = "https://api.igdb.com/v4/games"
-    body = f'search "{q}"; fields name, cover.url, genres.name, first_release_date, videos.video_id; where cover != null; limit 20;'
+    
+    # Buscamos 50 para ter margem de filtragem
+    body = f'search "{q}"; fields name, cover.url, genres.name, first_release_date, videos.video_id, total_rating_count; where cover != null; limit 50;'
     
     try:
         response = requests.post(url, headers=headers, data=body)
         games = response.json()
         
+        # --- 1. DEDUPLICAÇÃO INTELIGENTE (PRIORIDADE: MAIS RECENTE) ---
+        # Se houver dois jogos com o nome EXATAMENTE igual (ex: Resident Evil 4),
+        # mantemos apenas o que tiver a data de lançamento mais recente.
+        unique_map = {}
+        
+        for g in games:
+            # Normaliza o nome para garantir que "Game" e "game " sejam iguais
+            clean_name = g.get("name", "").lower().strip()
+            
+            if clean_name in unique_map:
+                existing = unique_map[clean_name]
+                
+                # Compara datas (timestamp unix)
+                date_new = g.get("first_release_date", 0) or 0
+                date_existing = existing.get("first_release_date", 0) or 0
+                
+                # Se o jogo atual do loop for mais novo que o que já guardamos, substitui!
+                if date_new > date_existing:
+                    unique_map[clean_name] = g
+            else:
+                unique_map[clean_name] = g
+        
+        # Recupera a lista limpa, agora contendo apenas as versões mais novas de cada nome
+        processed_games = list(unique_map.values())
+
+        # --- 2. LÓGICA DE ORDENAÇÃO E PENALIDADES ---
+        def sort_key(g):
+            name = g.get("name", "").lower().strip()
+            query = q.lower().strip()
+            
+            # Critério A: Match Exato (Peso Máximo)
+            is_exact = (name == query)
+            
+            # Critério B: É Jogo Base? (Anti-DLC/Edição)
+            penalty_keywords = ["dlc", "season pass", "soundtrack", "artbook", "demo", "bundle", "edition", "collection", "pack", "bonus", "content", "expansion"]
+            is_base_game = True
+            for word in penalty_keywords:
+                if word in name and word not in query:
+                    is_base_game = False
+                    break
+            
+            # Critério C: Começa com o termo?
+            starts_with = name.startswith(query)
+            
+            # Critério D: Fama / Popularidade (Desempate final)
+            popularity = g.get("total_rating_count", 0) or 0
+            
+            return (is_exact, is_base_game, starts_with, popularity)
+
+        # Ordena a lista já limpa
+        processed_games.sort(key=sort_key, reverse=True)
+        
+        # --- 3. FORMATAÇÃO FINAL ---
         results = []
-        for game in games:
+        for game in processed_games[:20]:
             cover_url = ""
             if "cover" in game:
                 cover_url = format_igdb_image(game["cover"]["url"])
@@ -418,7 +473,9 @@ def search_games(q: str = None):
                 "video_id": video_id,
                 "release_date": game.get("first_release_date", "")
             })
+            
         return results
+
     except Exception as e:
         print(f"Erro na busca IGDB: {e}")
         return []
@@ -460,11 +517,58 @@ def get_game(game_id: str, db: Session = Depends(get_db)):
                     steam_app_id = match.group(1)
                     break
     
+# ---------------------------------------------------------
+    # CORREÇÃO DA LÓGICA DE BUSCA STEAM (Anti-Sequência)
+    # ---------------------------------------------------------
     if not steam_app_id and igdb_data.get("name"):
         try:
             search_name = urllib.parse.quote(igdb_data["name"])
             search_url = f"https://store.steampowered.com/api/storesearch/?term={search_name}&l=portuguese&cc=BR"
             search_resp = requests.get(search_url, timeout=3).json()
+            
+            items = search_resp.get("items", [])
+            if items:
+                target_name = igdb_data["name"].lower().strip()
+                
+                # PASSO 1: Tenta encontrar um Match EXATO primeiro
+                # Isso garante que se buscarmos "Hades", ele ignore "Hades II" se o "Hades" original estiver na lista
+                for item in items:
+                    steam_name_clean = item["name"].lower().strip()
+                    if steam_name_clean == target_name:
+                        steam_app_id = item["id"]
+                        break
+                
+                # PASSO 2: Se não achou exato, usa lógica de similaridade mais estrita
+                if not steam_app_id:
+                    best_match_id = None
+                    best_ratio = 0.0
+                    
+                    for item in items:
+                        steam_name = item["name"].lower()
+                        
+                        # --- FILTRO ANTI-SEQUÊNCIA ---
+                        # Se o nome original não tem " II" ou " 2", mas o da Steam tem, ignora.
+                        # Isso evita que "Hades" pegue "Hades II" ou "Red Dead" pegue "Red Dead 2"
+                        if " ii" in steam_name and " ii" not in target_name: continue
+                        if " 2" in steam_name and " 2" not in target_name: continue
+                        if " 3" in steam_name and " 3" not in target_name: continue
+                        if " remake" in steam_name and " remake" not in target_name: continue
+
+                        # Verifica similaridade
+                        ratio = SequenceMatcher(None, target_name, steam_name).ratio()
+                        
+                        # Só aceita se for muito parecido (> 90%) e o tamanho não divergir muito
+                        if ratio > 0.90 and len(steam_name) <= len(target_name) + 5:
+                            if ratio > best_ratio:
+                                best_ratio = ratio
+                                best_match_id = item["id"]
+                    
+                    if best_match_id:
+                        steam_app_id = best_match_id
+
+        except Exception as e:
+            print(f"Erro na busca fallback Steam: {e}")
+    # ---------------------------------------------------------
             
             if search_resp.get("total") > 0 and len(search_resp.get("items", [])) > 0:
                 potential_item = search_resp["items"][0]
