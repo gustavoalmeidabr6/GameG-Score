@@ -17,6 +17,12 @@ import banner3 from "@/assets/BANNER3.png";
 import banner4 from "@/assets/BANNER4.png";
 import banner5 from "@/assets/BANNER5.png"; 
 import banner6 from "@/assets/BANNER6.png"; 
+// Adicionando novos banners (Assumindo que os arquivos existem na pasta assets)
+import banner7 from "@/assets/BANNER7.png";
+import banner8 from "@/assets/BANNER8.png";
+import banner9 from "@/assets/BANNER9.png";
+import banner10 from "@/assets/BANNER10.png";
+
 import defaultProfileImg from "@/assets/defaultprofile.png";
 
 // Logos das Redes
@@ -37,7 +43,11 @@ interface EditProfileDialogProps {
   onProfileUpdate: () => void;
 }
 
-const presetBanners = [banner1, banner2, banner3, banner4, banner5, banner6];
+// Lista atualizada com 10 banners
+const presetBanners = [
+  banner1, banner2, banner3, banner4, banner5, 
+  banner6, banner7, banner8, banner9, banner10
+];
 
 export const EditProfileDialog = ({ open, onOpenChange, currentBio, currentUsername, currentNickname, currentSocial, onProfileUpdate }: EditProfileDialogProps) => {
   const navigate = useNavigate(); // <--- Hook de navegação iniciado
