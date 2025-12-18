@@ -7,4 +7,4 @@ passlib
 bcrypt
 python-dotenv
 deep-translator
-python-jose
+python-jose[cryptography]
